@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-import json
-import os
 from supabase import create_client
 from streamlit_google_auth import Authenticate
 
@@ -21,61 +19,40 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# --- JSON CREDENTIALS GENERATOR ---
-def create_auth_json():
-    if not os.path.exists("google_credentials.json"):
-        creds = {
-            "web": {
-                "client_id": st.secrets["auth"]["client_id"],
-                "client_secret": st.secrets["auth"]["client_secret"],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
-            }
-        }
-        with open("google_credentials.json", "w") as f:
-            json.dump(creds, f)
-    return "google_credentials.json"
-
-# --- AUTHENTICATION SINGLETON ---
+# --- AUTHENTICATION (The "Script B" / No-File Method) ---
 def get_authenticator():
     if 'authenticator' in st.session_state:
         return st.session_state['authenticator']
 
-    json_path = create_auth_json()
+    # Pass secrets DIRECTLY. No JSON file needed.
     auth_instance = Authenticate(
-        secret_credentials_path=json_path,
-        cookie_name='home_os_v5', 
-        cookie_key='secure_key_v5',
-        redirect_uri=st.secrets['auth']['redirect_uri']
+        secret_credentials_path=None, # We are not using a file
+        client_id=st.secrets["auth"]["client_id"],
+        client_secret=st.secrets["auth"]["client_secret"],
+        redirect_uri=st.secrets["auth"]["redirect_uri"],
+        cookie_name='home_os_v6', # New cookie name to force a clean start
+        cookie_key='secure_key_v6',
+        cookie_expiry_days=30
     )
     st.session_state['authenticator'] = auth_instance
     return auth_instance
 
-# --- THE LOOP FIX IS HERE ---
+# --- AUTH FLOW ---
 authenticator = get_authenticator()
 
-# 1. Only run the check if we aren't already connected
-if not st.session_state.get('connected'):
-    try:
-        authenticator.check_authentification()
-    except Exception as e:
-        # If the check fails (e.g. old code in URL), just pass and let the user click login again
-        st.session_state['connected'] = False
+# Check auth status once. Catch errors to prevent crashes on stale codes.
+try:
+    authenticator.check_authentification()
+except Exception:
+    pass
 
-# 2. CRITICAL: If we are connected, clean the URL so it doesn't loop on reload
-if st.session_state.get('connected'):
-    # If the URL still has the 'code' parameter, clear it!
-    if "code" in st.query_params:
-        st.query_params.clear()
-
-# --- LOGIN FLOW ---
+# --- LOGIN CHECK ---
 def check_login():
-    # Dev Bypass
+    # 1. Dev Bypass
     if st.session_state.get('dev_mode'):
         return "dev_user@example.com"
     
-    # Real Login
+    # 2. Real Login
     if st.session_state.get('connected'):
         user_info = st.session_state.get('user_info', {})
         return user_info.get('email')
@@ -95,7 +72,7 @@ def show_login():
         st.markdown("### See the real value you bring to your family")
         st.markdown("---")
         
-        # Real Login Button
+        # Real Login
         auth_url = authenticator.get_authorization_url()
         st.link_button("🔑 Sign in with Google", auth_url, use_container_width=True)
         
