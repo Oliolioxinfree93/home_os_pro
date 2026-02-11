@@ -1,3 +1,19 @@
+ChatGPT is right—that specific line is the "Loop Factory."
+
+Here is exactly what is happening:
+
+1. **Google sends you back** with a "secret code" in the URL (e.g., `?code=abc1234`).
+2. **Streamlit sees the code**, uses it to log you in, and sets a "Success" cookie.
+3. **Streamlit reloads** (because it set a cookie).
+4. **The App loads again**, sees the **SAME** `?code=abc1234` in the URL, tries to use it *again*, fails (because it's already used), and crashes or reloads forever.
+
+### **The Fix: "One-Time Check" + URL Cleaning**
+
+We need to tell the app: *"If I am already logged in, ignore the code in the URL."*
+
+**Replace your `app.py` with this version.** I have modified the **Authentication Section** to stop the loop.
+
+```python
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
@@ -37,34 +53,45 @@ def create_auth_json():
             json.dump(creds, f)
     return "google_credentials.json"
 
-# --- AUTHENTICATION SINGLETON (The Fix) ---
+# --- AUTHENTICATION SINGLETON ---
 def get_authenticator():
-    # Check if we already created it. If so, return the existing one.
     if 'authenticator' in st.session_state:
         return st.session_state['authenticator']
 
-    # If not, create it once and save it.
     json_path = create_auth_json()
     auth_instance = Authenticate(
         secret_credentials_path=json_path,
-        cookie_name='home_os_cookie_v4', # New name to force fresh start
-        cookie_key='home_os_secure_key_v4',
+        cookie_name='home_os_v5', 
+        cookie_key='secure_key_v5',
         redirect_uri=st.secrets['auth']['redirect_uri']
     )
     st.session_state['authenticator'] = auth_instance
     return auth_instance
 
-# Initialize Auth ONCE
+# --- THE LOOP FIX IS HERE ---
 authenticator = get_authenticator()
-authenticator.check_authentification()
+
+# 1. Only run the check if we aren't already connected
+if not st.session_state.get('connected'):
+    try:
+        authenticator.check_authentification()
+    except Exception as e:
+        # If the check fails (e.g. old code in URL), just pass and let the user click login again
+        st.session_state['connected'] = False
+
+# 2. CRITICAL: If we are connected, clean the URL so it doesn't loop on reload
+if st.session_state.get('connected'):
+    # If the URL still has the 'code' parameter, clear it!
+    if "code" in st.query_params:
+        st.query_params.clear()
 
 # --- LOGIN FLOW ---
 def check_login():
-    # 1. Dev Bypass
+    # Dev Bypass
     if st.session_state.get('dev_mode'):
         return "dev_user@example.com"
     
-    # 2. Real Login Status
+    # Real Login
     if st.session_state.get('connected'):
         user_info = st.session_state.get('user_info', {})
         return user_info.get('email')
@@ -84,11 +111,12 @@ def show_login():
         st.markdown("### See the real value you bring to your family")
         st.markdown("---")
         
-        # Use the existing authenticator
+        # Real Login Button
         auth_url = authenticator.get_authorization_url()
         st.link_button("🔑 Sign in with Google", auth_url, use_container_width=True)
         
         st.markdown("---")
+        # Dev Button
         if st.button("🛠️ Skip Login (Dev Mode)", use_container_width=True):
             st.session_state['dev_mode'] = True
             st.session_state['user_info'] = {'name': 'Dev User', 'picture': ''}
@@ -241,6 +269,7 @@ if user_picture: st.sidebar.image(user_picture, width=40)
 st.sidebar.markdown(f"**Welcome, {user_name.split()[0]}!** 👋")
 if st.sidebar.button("🚪 Sign Out", use_container_width=True):
     st.session_state['dev_mode'] = False
+    st.session_state['connected'] = False
     authenticator.logout()
     st.rerun()
 
@@ -374,7 +403,7 @@ with tab2:
     else: st.success("✅ Shopping list is empty!")
 
 # ... (Tabs 3-5 logic implied same as before) ... 
-# Use tabs from previous script or add back here if missing.
-# Tabs 3, 4, 5 are kept brief above to ensure it fits, but logic is identical.
 st.markdown("---")
 st.caption("Home OS Pro | Built with ❤️ for stay-at-home parents")
+
+```
