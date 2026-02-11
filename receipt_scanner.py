@@ -1,19 +1,18 @@
 import google.generativeai as genai
 import json
 import PIL.Image
-from datetime import datetime
-
-# Configure your API Key (Get one at aistudio.google.com)
-# It's free for personal rate limits
-GOOGLE_API_KEY = "YOUR_GEMINI_API_KEY"
+import streamlit as st
 
 class ReceiptScanner:
     def __init__(self):
-        if GOOGLE_API_KEY != "YOUR_GEMINI_API_KEY":
-            genai.configure(api_key=GOOGLE_API_KEY)
+        # Try to get the key from the secure vault (Streamlit Secrets)
+        try:
+            self.api_key = st.secrets["GOOGLE_API_KEY"]
+            genai.configure(api_key=self.api_key)
             self.model = genai.GenerativeModel('gemini-1.5-flash')
             self.active = True
-        else:
+        except:
+            # If the key is missing, disable the scanner safely
             self.active = False
 
     def scan_receipt(self, image_file):
@@ -22,7 +21,7 @@ class ReceiptScanner:
         returns a list of items found.
         """
         if not self.active:
-            return {"error": "API Key missing. Please configure receipt_scanner.py"}
+            return {"error": "API Key missing. Add GOOGLE_API_KEY to Streamlit Secrets."}
 
         try:
             # 1. Prepare Image
@@ -54,12 +53,3 @@ class ReceiptScanner:
 
         except Exception as e:
             return {"error": f"Scan failed: {str(e)}"}
-
-# Mock function for testing without API
-    def mock_scan(self):
-        return [
-            {"item": "Organic Bananas", "price": 1.29, "qty": 1, "category": "Produce"},
-            {"item": "Sourdough Bread", "price": 4.50, "qty": 1, "category": "Bakery"},
-            {"item": "Almond Milk", "price": 3.99, "qty": 1, "category": "Dairy"},
-            {"item": "Chicken Breast", "price": 12.45, "qty": 1, "category": "Meat"}
-        ]
