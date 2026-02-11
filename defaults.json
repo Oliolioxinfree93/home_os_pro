@@ -1,0 +1,50 @@
+{
+  "milk": {
+    "category": "Dairy",
+    "expiry_days": 7,
+    "frozen_expiry_days": 90,
+    "unit": "gallon"
+  },
+  "eggs": {
+    "category": "Dairy",
+    "expiry_days": 21,
+    "frozen_expiry_days": null,
+    "unit": "carton"
+  },
+  "chicken": {
+    "category": "Meat",
+    "expiry_days": 4,
+    "frozen_expiry_days": 180,
+    "unit": "lb"
+  },
+  "spinach": {
+    "category": "Produce",
+    "expiry_days": 5,
+    "frozen_expiry_days": 270,
+    "unit": "bag"
+  },
+  "rice": {
+    "category": "Pantry",
+    "expiry_days": 365,
+    "frozen_expiry_days": 365,
+    "unit": "bag"
+  },
+  "bread": {
+    "category": "Bakery",
+    "expiry_days": 7,
+    "frozen_expiry_days": 90,
+    "unit": "loaf"
+  },
+  "pasta": {
+    "category": "Pantry",
+    "expiry_days": 365,
+    "frozen_expiry_days": null,
+    "unit": "box"
+  },
+  "cheese": {
+    "category": "Dairy",
+    "expiry_days": 14,
+    "frozen_expiry_days": 180,
+    "unit": "block"
+  }
+}
