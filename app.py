@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-import json
-import os
 from supabase import create_client
-from streamlit_google_auth import Authenticate
+from streamlit_oauth import OAuth2Component
+import base64
+import json
 
 # --- APP CONFIG ---
 st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide")
@@ -21,110 +21,97 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# --- THE FIX: GENERATE THE FILE THE LIBRARY WANTS ---
-def create_auth_json():
-    # We create a physical file because the library refuses to work without one
-    creds = {
-        "web": {
-            "client_id": st.secrets["auth"]["client_id"],
-            "client_secret": st.secrets["auth"]["client_secret"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
-        }
-    }
-    with open("google_credentials.json", "w") as f:
-        json.dump(creds, f)
-    return "google_credentials.json"
-
-# --- AUTHENTICATION SINGLETON ---
-def get_authenticator():
-    if 'authenticator' in st.session_state:
-        return st.session_state['authenticator']
-
-    # 1. Create the file
-    json_path = create_auth_json()
-
-    # 2. Initialize using ONLY the file path (No client_id arg to avoid error)
-    auth_instance = Authenticate(
-        secret_credentials_path=json_path,
-        cookie_name='home_os_cookie_v8', 
-        cookie_key='secure_key_v8',
-        redirect_uri=st.secrets['auth']['redirect_uri']
-    )
-    st.session_state['authenticator'] = auth_instance
-    return auth_instance
-
-# --- AUTH FLOW ---
-authenticator = get_authenticator()
-
-# STOP THE LOOP: Only check auth if we aren't already connected.
-if not st.session_state.get('connected'):
+# --- NEW AUTHENTICATION SETUP ---
+def setup_auth():
+    # Load keys from secrets
     try:
-        authenticator.check_authentification()
-    except Exception:
-        pass
+        CLIENT_ID = st.secrets["auth"]["client_id"]
+        CLIENT_SECRET = st.secrets["auth"]["client_secret"]
+        REDIRECT_URI = st.secrets["auth"]["redirect_uri"]
+    except KeyError:
+        st.error("Missing secrets! Make sure you have an [auth] section with client_id, client_secret, and redirect_uri.")
+        st.stop()
+    
+    # Standard Google Endpoints
+    AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+    TOKEN_URL = "https://oauth2.googleapis.com/token"
+    REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
-# --- LOGIN CHECK ---
+    # Create the OAuth Component
+    return OAuth2Component(
+        CLIENT_ID, CLIENT_SECRET, 
+        AUTHORIZE_URL, TOKEN_URL, TOKEN_URL, REVOKE_URL
+    ), REDIRECT_URI
+
+# --- LOGIN HELPER ---
+def decode_id_token(token):
+    # Simple decode to get user email from the Google Token
+    try:
+        parts = token.split(".")
+        if len(parts) != 3: return {}
+        padding = 4 - (len(parts[1]) % 4)
+        claims = base64.urlsafe_b64decode(parts[1] + "=" * padding)
+        return json.loads(claims)
+    except:
+        return {}
+
+# --- MAIN AUTH FLOW ---
 def check_login():
-    # 1. Dev Bypass
+    # 1. Dev Mode Bypass
     if st.session_state.get('dev_mode'):
         return "dev_user@example.com"
+
+    # 2. Check if already logged in (Token exists in session)
+    if 'token' in st.session_state:
+        # We have a token! Get user info
+        token = st.session_state['token']
+        # Google returns an 'id_token' which contains the user info
+        if 'id_token' in token:
+            user_info = decode_id_token(token['id_token'])
+            st.session_state['user_email'] = user_info.get('email')
+            st.session_state['user_name'] = user_info.get('name')
+            st.session_state['user_picture'] = user_info.get('picture')
+            return user_info.get('email')
+
+    # 3. If NOT logged in, show the Login Button
+    st.markdown("## 🏠 Home OS Pro")
+    st.markdown("#### Sign in to access your fridge")
     
-    # 2. Real Login
-    if st.session_state.get('connected'):
-        user_info = st.session_state.get('user_info', {})
-        return user_info.get('email')
+    oauth2, redirect_uri = setup_auth()
     
-    return None
-
-def show_login():
-    st.markdown("""
-    <style>
-    .login-container { padding: 80px 20px; text-align: center; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("## 🏠 Home OS Pro")
-        st.markdown("### See the real value you bring to your family")
-        st.markdown("---")
+    # The Magic Button: Handles the whole redirect loop for you
+    result = oauth2.authorize_button(
+        name="Continue with Google",
+        icon="https://www.google.com.tw/favicon.ico",
+        redirect_uri=redirect_uri,
+        scope="openid email profile",
+        key="google_auth_btn",
+        extras_params={"prompt": "select_account"},
+    )
+    
+    # If the button returned a result (Success!)
+    if result:
+        st.session_state['token'] = result
+        st.rerun() # Reload once to apply the login
         
-        # Real Login
-        auth_url = authenticator.get_authorization_url()
-        st.link_button("🔑 Sign in with Google", auth_url, use_container_width=True)
+    st.markdown("---")
+    if st.button("🛠️ Skip Login (Dev Mode)"):
+        st.session_state['dev_mode'] = True
+        st.rerun()
         
-        st.markdown("---")
-        # Dev Button
-        if st.button("🛠️ Skip Login (Dev Mode)", use_container_width=True):
-            st.session_state['dev_mode'] = True
-            st.session_state['user_info'] = {'name': 'Dev User', 'picture': ''}
-            st.session_state['connected'] = True
-            st.rerun()
+    st.stop() # Stop here until they log in
 
-# --- MAIN CONTROLLER ---
+# --- INITIALIZE USER ---
 user_id = check_login()
-
-if not user_id:
-    show_login()
-    st.stop()
-
-# --- APP LOGIC (Only runs if logged in) ---
-if st.session_state.get('dev_mode'):
-    user_name = "Dev User"
-    user_picture = ""
-    st.warning("⚠️ Developer Mode Active")
-else:
-    user_name = st.session_state.get('user_name', 'Friend')
-    user_picture = st.session_state.get('user_picture', '')
+user_name = st.session_state.get('user_name', 'Friend')
+user_picture = st.session_state.get('user_picture', '')
 
 # --- IMPORT MANAGERS ---
 from inventory_logic import InventoryLogic
 from barcode_scanner import BarcodeScanner
 from receipt_scanner import ReceiptScanner
 
-# --- DATABASE FUNCTIONS ---
+# --- DATABASE FUNCTIONS (Unchanged) ---
 def db_get_inventory():
     try:
         response = supabase.table("inventory").select("*").eq("user_id", user_id).eq("status", "In Stock").execute()
