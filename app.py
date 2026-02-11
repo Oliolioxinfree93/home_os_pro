@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import json
 import os
 from supabase import create_client
+from streamlit_google_auth import Authenticate
 
 # --- APP CONFIG ---
 st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide")
@@ -17,37 +18,27 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# --- GOOGLE LOGIN (FIXED TO READ FROM [auth]) ---
+# --- AUTHENTICATION SETUP (Run Once) ---
+@st.cache_resource
+def get_authenticator():
+    # This creates the authenticator object only ONCE
+    return Authenticate(
+        secret_credentials_path='auth',
+        cookie_name='home_os_auth',
+        cookie_key='home_os_secret_key_2024',
+        redirect_uri=st.secrets['auth']['redirect_uri']
+    )
+
+# Initialize Auth
+authenticator = get_authenticator()
+# Check status immediately
+authenticator.check_authentification()
+
+# --- LOGIN SCREEN ---
 def show_login():
     st.markdown("""
     <style>
-    .login-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 80px 20px;
-    }
-    .login-title {
-        font-size: 3em;
-        font-weight: bold;
-        margin-bottom: 10px;
-        text-align: center;
-    }
-    .login-subtitle {
-        font-size: 1.2em;
-        color: #666;
-        margin-bottom: 40px;
-        text-align: center;
-    }
-    .login-features {
-        background: #f8f9fa;
-        border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 40px;
-        max-width: 500px;
-        width: 100%;
-    }
+    .login-container { padding: 80px 20px; text-align: center; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,7 +47,6 @@ def show_login():
         st.markdown("## 🏠 Home OS Pro")
         st.markdown("### See the real value you bring to your family")
         st.markdown("---")
-
         st.markdown("""
         **What you'll track:**
         
@@ -65,64 +55,30 @@ def show_login():
         ♻️ Food waste prevented  
         💼 Your monthly household impact  
         """)
-
         st.markdown("---")
         st.markdown("#### Sign in to get your personal fridge")
 
-        try:
-            from streamlit_google_auth import Authenticate
-            
-            # --- UPDATED: Look inside st.secrets['auth'] ---
-            authenticator = Authenticate(
-                secret_credentials_path='auth', # Looks for [auth] in secrets.toml
-                cookie_name='home_os_auth',
-                cookie_key='home_os_secret_key_2024',
-                redirect_uri=st.secrets['auth']['redirect_uri']
-            )
+        # Use the GLOBAL authenticator, don't create a new one
+        authorization_url = authenticator.get_authorization_url()
+        st.link_button("🔑 Sign in with Google", authorization_url, use_container_width=True)
+        st.caption("Your data is private. Only you can see your fridge.")
 
-            authenticator.check_authentification()
-
-            if not st.session_state.get('connected'):
-                authorization_url = authenticator.get_authorization_url()
-                st.link_button("🔑 Sign in with Google", authorization_url, use_container_width=True)
-                st.caption("Your data is private. Only you can see your fridge.")
-            else:
-                st.rerun()
-
-        except Exception as e:
-            st.error(f"Login error: {e}")
-            st.info("Check that your secrets.toml has the [auth] section set up correctly.")
-
-# --- CHECK AUTH (FIXED) ---
-def get_current_user():
-    if 'user_id' in st.session_state and st.session_state['user_id']:
-        return st.session_state['user_id']
-
-    try:
-        from streamlit_google_auth import Authenticate
-        # --- UPDATED: Look inside st.secrets['auth'] ---
-        authenticator = Authenticate(
-            secret_credentials_path='auth',
-            cookie_name='home_os_auth',
-            cookie_key='home_os_secret_key_2024',
-            redirect_uri=st.secrets['auth']['redirect_uri']
-        )
-        authenticator.check_authentification()
-
-        if st.session_state.get('connected'):
-            user_info = st.session_state.get('user_info', {})
-            user_id = user_info.get('email', '')
-            st.session_state['user_id'] = user_id
-            st.session_state['user_name'] = user_info.get('name', 'Friend')
-            st.session_state['user_picture'] = user_info.get('picture', '')
-            return user_id
-    except:
-        pass
-
+# --- CHECK AUTH ---
+def get_current_user_id():
+    # Check if connected
+    if st.session_state.get('connected'):
+        user_info = st.session_state.get('user_info', {})
+        user_id = user_info.get('email', '')
+        
+        # Store user details in session state
+        st.session_state['user_id'] = user_id
+        st.session_state['user_name'] = user_info.get('name', 'Friend')
+        st.session_state['user_picture'] = user_info.get('picture', '')
+        return user_id
     return None
 
-# --- MAIN APP ---
-user_id = get_current_user()
+# --- MAIN FLOW ---
+user_id = get_current_user_id()
 
 if not user_id:
     show_login()
@@ -132,8 +88,8 @@ if not user_id:
 user_name = st.session_state.get('user_name', 'Friend')
 user_picture = st.session_state.get('user_picture', '')
 
-# --- IMPORT MANAGERS (pass user_id to all) ---
-# NOTE: Ensure you have these files (inventory_logic.py, etc.) in your GitHub
+# --- IMPORT MANAGERS ---
+# NOTE: Ensure you have these files in your GitHub
 from inventory_logic import InventoryLogic
 from barcode_scanner import BarcodeScanner
 from receipt_scanner import ReceiptScanner
@@ -386,8 +342,7 @@ st.sidebar.markdown(f"**Welcome, {user_name.split()[0]}!** 👋")
 
 # Logout
 if st.sidebar.button("🚪 Sign Out", use_container_width=True):
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
+    authenticator.logout() # Use the authenticator to logout
     st.rerun()
 
 st.sidebar.markdown("---")
