@@ -18,12 +18,33 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# --- AUTHENTICATION SETUP (Run Once) ---
-@st.cache_resource
+# --- THE FIX: CREATE CREDENTIALS FILE ON THE FLY ---
+def create_auth_json():
+    """
+    The login library insists on a physical file. 
+    We create one temporarily using values from st.secrets.
+    """
+    creds = {
+        "web": {
+            "client_id": st.secrets["auth"]["client_id"],
+            "client_secret": st.secrets["auth"]["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
+        }
+    }
+    with open("google_credentials.json", "w") as f:
+        json.dump(creds, f)
+    return "google_credentials.json"
+
+# --- AUTHENTICATION SETUP (No Cache!) ---
 def get_authenticator():
-    # This creates the authenticator object only ONCE
+    # 1. Generate the JSON file the library wants
+    json_path = create_auth_json()
+    
+    # 2. Create the authenticator
     return Authenticate(
-        secret_credentials_path='auth',
+        secret_credentials_path=json_path,
         cookie_name='home_os_auth',
         cookie_key='home_os_secret_key_2024',
         redirect_uri=st.secrets['auth']['redirect_uri']
@@ -58,7 +79,7 @@ def show_login():
         st.markdown("---")
         st.markdown("#### Sign in to get your personal fridge")
 
-        # Use the GLOBAL authenticator, don't create a new one
+        # Use the GLOBAL authenticator
         authorization_url = authenticator.get_authorization_url()
         st.link_button("🔑 Sign in with Google", authorization_url, use_container_width=True)
         st.caption("Your data is private. Only you can see your fridge.")
