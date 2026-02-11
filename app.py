@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
+import json
+import os
 from supabase import create_client
 from streamlit_google_auth import Authenticate
 
@@ -19,36 +21,51 @@ def get_supabase():
 
 supabase = get_supabase()
 
+# --- THE FIX: GENERATE THE FILE THE LIBRARY WANTS ---
+def create_auth_json():
+    # We create a physical file because the library refuses to work without one
+    creds = {
+        "web": {
+            "client_id": st.secrets["auth"]["client_id"],
+            "client_secret": st.secrets["auth"]["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
+        }
+    }
+    with open("google_credentials.json", "w") as f:
+        json.dump(creds, f)
+    return "google_credentials.json"
+
 # --- AUTHENTICATION SINGLETON ---
 def get_authenticator():
     if 'authenticator' in st.session_state:
         return st.session_state['authenticator']
 
-    # Create new instance if one doesn't exist
+    # 1. Create the file
+    json_path = create_auth_json()
+
+    # 2. Initialize using ONLY the file path (No client_id arg to avoid error)
     auth_instance = Authenticate(
-        secret_credentials_path=None,
-        client_id=st.secrets["auth"]["client_id"],
-        client_secret=st.secrets["auth"]["client_secret"],
-        redirect_uri=st.secrets["auth"]["redirect_uri"],
-        cookie_name='home_os_v7', # Bump version to force clean cookies
-        cookie_key='secure_key_v7',
-        cookie_expiry_days=30
+        secret_credentials_path=json_path,
+        cookie_name='home_os_cookie_v8', 
+        cookie_key='secure_key_v8',
+        redirect_uri=st.secrets['auth']['redirect_uri']
     )
     st.session_state['authenticator'] = auth_instance
     return auth_instance
 
-# --- THE FIX: CONDITIONAL AUTH CHECK ---
+# --- AUTH FLOW ---
 authenticator = get_authenticator()
 
 # STOP THE LOOP: Only check auth if we aren't already connected.
-# This prevents the app from re-processing the auth code on every rerun.
 if not st.session_state.get('connected'):
     try:
         authenticator.check_authentification()
     except Exception:
         pass
 
-# --- LOGIN FLOW ---
+# --- LOGIN CHECK ---
 def check_login():
     # 1. Dev Bypass
     if st.session_state.get('dev_mode'):
@@ -230,11 +247,9 @@ def db_consume_ingredients(ingredient_names):
 st.sidebar.title("🏠 Home OS Pro")
 if user_picture: st.sidebar.image(user_picture, width=40)
 st.sidebar.markdown(f"**Welcome, {user_name.split()[0]}!** 👋")
-
-# THE FIX: Clean Logout that clears ALL session state
 if st.sidebar.button("🚪 Sign Out", use_container_width=True):
-    st.session_state.clear() # Wipes the slate clean
-    st.rerun() # Reruns app -> checks auth -> finds nothing -> shows login
+    st.session_state.clear()
+    st.rerun()
 
 st.sidebar.markdown("---")
 savings = db_calculate_savings()
