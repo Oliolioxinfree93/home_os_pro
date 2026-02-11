@@ -17,7 +17,7 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# --- GOOGLE LOGIN ---
+# --- GOOGLE LOGIN (FIXED TO READ FROM [auth]) ---
 def show_login():
     st.markdown("""
     <style>
@@ -71,17 +71,13 @@ def show_login():
 
         try:
             from streamlit_google_auth import Authenticate
-            client_id = st.secrets["GOOGLE_CLIENT_ID"]
-            client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
-            redirect_uri = st.secrets["REDIRECT_URI"]
-
+            
+            # --- UPDATED: Look inside st.secrets['auth'] ---
             authenticator = Authenticate(
-                secret_credentials_path=None,
+                secret_credentials_path='auth', # Looks for [auth] in secrets.toml
                 cookie_name='home_os_auth',
                 cookie_key='home_os_secret_key_2024',
-                redirect_uri=redirect_uri,
-                client_id=client_id,
-                client_secret=client_secret
+                redirect_uri=st.secrets['auth']['redirect_uri']
             )
 
             authenticator.check_authentification()
@@ -95,22 +91,21 @@ def show_login():
 
         except Exception as e:
             st.error(f"Login error: {e}")
-            st.info("Make sure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and REDIRECT_URI are in Streamlit Secrets.")
+            st.info("Check that your secrets.toml has the [auth] section set up correctly.")
 
-# --- CHECK AUTH ---
+# --- CHECK AUTH (FIXED) ---
 def get_current_user():
     if 'user_id' in st.session_state and st.session_state['user_id']:
         return st.session_state['user_id']
 
     try:
         from streamlit_google_auth import Authenticate
+        # --- UPDATED: Look inside st.secrets['auth'] ---
         authenticator = Authenticate(
-            secret_credentials_path=None,
+            secret_credentials_path='auth',
             cookie_name='home_os_auth',
             cookie_key='home_os_secret_key_2024',
-            redirect_uri=st.secrets["REDIRECT_URI"],
-            client_id=st.secrets["GOOGLE_CLIENT_ID"],
-            client_secret=st.secrets["GOOGLE_CLIENT_SECRET"]
+            redirect_uri=st.secrets['auth']['redirect_uri']
         )
         authenticator.check_authentification()
 
@@ -138,6 +133,7 @@ user_name = st.session_state.get('user_name', 'Friend')
 user_picture = st.session_state.get('user_picture', '')
 
 # --- IMPORT MANAGERS (pass user_id to all) ---
+# NOTE: Ensure you have these files (inventory_logic.py, etc.) in your GitHub
 from inventory_logic import InventoryLogic
 from barcode_scanner import BarcodeScanner
 from receipt_scanner import ReceiptScanner
@@ -495,8 +491,7 @@ with tab0:
     st.caption("The real economic value you bring to your family every month")
 
     st.info("""
-    💡 **How we calculate:**  
-    **Direct Savings** = Actual money kept vs. eating out / delivery fees  
+    💡 **How we calculate:** **Direct Savings** = Actual money kept vs. eating out / delivery fees  
     **Labor Value** = What you'd pay to hire these services at market rates
     """)
 
