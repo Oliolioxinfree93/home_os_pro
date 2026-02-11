@@ -5,22 +5,16 @@ from datetime import date, datetime, timedelta
 import json
 import os
 
-# --- AUTO-SETUP DATABASE (The Fix for Cloud Deployment) ---
-# This runs once when the app wakes up to ensure the database exists.
+
+# --- AUTO-SETUP DATABASE (Debug Mode) ---
+# If home.db doesn't exist, create it immediately.
 if not os.path.exists('home.db'):
-    try:
-        from create_db import create_database
-        from demo_data import load_demo
-        
-        # 1. Build the empty tables
-        create_database()
-        
-        # 2. Load sample data so the app isn't empty (Optional)
-        load_demo()
-        print("✅ Database automatically initialized.")
-    except ImportError:
-        st.error("❌ Critical Error: create_db.py or demo_data.py is missing.")
-        st.stop()
+    # We removed the 'try' block to see the actual error
+    from create_db import create_database
+    from demo_data import load_demo
+    
+    create_database()
+    load_demo()
 
 # --- IMPORT MODULES ---
 from inventory_manager import InventoryManager
@@ -436,3 +430,4 @@ with tab5:
 
 st.markdown("---")
 st.caption("Home OS Pro v2.0 | Built with ❤️")
+
