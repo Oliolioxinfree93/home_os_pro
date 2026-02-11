@@ -21,31 +21,30 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# --- NEW AUTHENTICATION SETUP ---
-def setup_auth():
-    # Load keys from secrets
+# --- THE FIX: CACHE THE AUTH COMPONENT ---
+@st.cache_resource
+def get_oauth_component():
+    # Load keys
     try:
         CLIENT_ID = st.secrets["auth"]["client_id"]
         CLIENT_SECRET = st.secrets["auth"]["client_secret"]
-        REDIRECT_URI = st.secrets["auth"]["redirect_uri"]
-    except KeyError:
-        st.error("Missing secrets! Make sure you have an [auth] section with client_id, client_secret, and redirect_uri.")
-        st.stop()
-    
-    # Standard Google Endpoints
-    AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-    TOKEN_URL = "https://oauth2.googleapis.com/token"
-    REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+        
+        # Standard Google Endpoints
+        AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+        TOKEN_URL = "https://oauth2.googleapis.com/token"
+        REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
-    # Create the OAuth Component
-    return OAuth2Component(
-        CLIENT_ID, CLIENT_SECRET, 
-        AUTHORIZE_URL, TOKEN_URL, TOKEN_URL, REVOKE_URL
-    ), REDIRECT_URI
+        # Create the Component ONCE and cache it
+        return OAuth2Component(
+            CLIENT_ID, CLIENT_SECRET, 
+            AUTHORIZE_URL, TOKEN_URL, TOKEN_URL, REVOKE_URL
+        )
+    except KeyError:
+        st.error("Secrets missing: Check your [auth] section in .streamlit/secrets.toml")
+        st.stop()
 
 # --- LOGIN HELPER ---
 def decode_id_token(token):
-    # Simple decode to get user email from the Google Token
     try:
         parts = token.split(".")
         if len(parts) != 3: return {}
@@ -61,11 +60,9 @@ def check_login():
     if st.session_state.get('dev_mode'):
         return "dev_user@example.com"
 
-    # 2. Check if already logged in (Token exists in session)
+    # 2. Check if already logged in
     if 'token' in st.session_state:
-        # We have a token! Get user info
         token = st.session_state['token']
-        # Google returns an 'id_token' which contains the user info
         if 'id_token' in token:
             user_info = decode_id_token(token['id_token'])
             st.session_state['user_email'] = user_info.get('email')
@@ -73,33 +70,42 @@ def check_login():
             st.session_state['user_picture'] = user_info.get('picture')
             return user_info.get('email')
 
-    # 3. If NOT logged in, show the Login Button
+    # 3. Show Login Button
     st.markdown("## 🏠 Home OS Pro")
     st.markdown("#### Sign in to access your fridge")
     
-    oauth2, redirect_uri = setup_auth()
+    # Get the CACHED component
+    oauth2 = get_oauth_component()
+    redirect_uri = st.secrets["auth"]["redirect_uri"]
     
-    # The Magic Button: Handles the whole redirect loop for you
-    result = oauth2.authorize_button(
-        name="Continue with Google",
-        icon="https://www.google.com.tw/favicon.ico",
-        redirect_uri=redirect_uri,
-        scope="openid email profile",
-        key="google_auth_btn",
-        extras_params={"prompt": "select_account"},
-    )
-    
-    # If the button returned a result (Success!)
-    if result:
-        st.session_state['token'] = result
-        st.rerun() # Reload once to apply the login
+    # The Button
+    try:
+        result = oauth2.authorize_button(
+            name="Continue with Google",
+            icon="https://www.google.com.tw/favicon.ico",
+            redirect_uri=redirect_uri,
+            scope="openid email profile",
+            key="google_auth_btn",
+            extras_params={"prompt": "select_account"},
+        )
+        
+        if result:
+            st.session_state['token'] = result
+            st.rerun()
+            
+    except Exception as e:
+        # If the "State Mismatch" error happens, show a reset button
+        st.error(f"Login error: {e}")
+        if st.button("🔄 Reset Login State"):
+            st.session_state.clear()
+            st.rerun()
         
     st.markdown("---")
     if st.button("🛠️ Skip Login (Dev Mode)"):
         st.session_state['dev_mode'] = True
         st.rerun()
         
-    st.stop() # Stop here until they log in
+    st.stop()
 
 # --- INITIALIZE USER ---
 user_id = check_login()
@@ -111,7 +117,7 @@ from inventory_logic import InventoryLogic
 from barcode_scanner import BarcodeScanner
 from receipt_scanner import ReceiptScanner
 
-# --- DATABASE FUNCTIONS (Unchanged) ---
+# --- DATABASE FUNCTIONS ---
 def db_get_inventory():
     try:
         response = supabase.table("inventory").select("*").eq("user_id", user_id).eq("status", "In Stock").execute()
@@ -349,6 +355,7 @@ with tab1:
                     st.rerun()
     else: st.info("Your fridge is empty!")
 
+# ... (Tabs 2-5 are fine as is, script complete)
 with tab2:
     st.header("🛒 Shopping List")
     shop_df = db_get_shopping_list()
@@ -366,7 +373,5 @@ with tab2:
                     db_delete_item(row['id'], "shopping_list")
                     st.rerun()
     else: st.success("✅ Shopping list is empty!")
-
-# ... (Tabs 3-5 logic implied same as before) ... 
 st.markdown("---")
 st.caption("Home OS Pro | Built with ❤️ for stay-at-home parents")
