@@ -1,99 +1,43 @@
-import sqlite3
-import datetime
-from datetime import timedelta
-from inventory_logic import InventoryLogic
+import streamlit as st
+from st_supabase_connection import SupabaseConnection
 
 class InventoryManager:
-    def __init__(self, db_name='home.db'):
-        self.db_name = db_name
-        self.logic = InventoryLogic()
+    def __init__(self):
+        # Connect to the cloud database using the secrets you just saved
+        try:
+            self.conn = st.connection("supabase", type=SupabaseConnection)
+        except Exception as e:
+            st.error(f"Failed to connect to Supabase: {e}")
 
-    def add_item(self, raw_item_name, quantity=1, price=None, store=None, barcode=None):
-        analysis = self.logic.normalize_item(raw_item_name)
-        today = datetime.date.today()
-        expiry_date = today + timedelta(days=analysis['expiry_days'])
-        
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        INSERT INTO inventory (item_name, category, quantity, unit, storage, date_added, 
-                              expiry_date, status, decision_reason, price, store, barcode)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            analysis['clean_name'], 
-            analysis['category'], 
-            quantity, 
-            analysis['unit'],      
-            analysis['storage'],   
-            today, 
-            expiry_date, 
-            'In Stock',
-            analysis['reason'],
-            price,
-            store,
-            barcode
-        ))
-        
-        conn.commit()
-        conn.close()
-        print(f"Added '{analysis['clean_name']}' ({analysis['storage']})")
+    def add_item(self, name, quantity=1, category="Other", unit="unit", storage="fresh", price=0.0, store="None"):
+        """Adds a new item to your Cloud Fridge."""
+        item_data = {
+            "item_name": name.lower(),
+            "quantity": quantity,
+            "category": category,
+            "unit": unit,
+            "storage": storage,
+            "price": price,
+            "store": store,
+            "status": "In Stock"
+        }
+        # Insert into the 'inventory' table in Supabase
+        return self.conn.table("inventory").insert(item_data).execute()
 
-    def add_to_shopping_list(self, item_name, estimated_price=None, barcode=None):
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM shopping_list WHERE item_name = ?", (item_name,))
-        if not cursor.fetchone():
-            cursor.execute('''
-            INSERT INTO shopping_list (item_name, is_urgent, estimated_price, barcode) 
-            VALUES (?, 0, ?, ?)
-            ''', (item_name, estimated_price, barcode))
-            print(f"🛒 Added '{item_name}' to shopping list.")
-        conn.commit()
-        conn.close()
+    def get_inventory(self):
+        """Fetches all items currently in stock."""
+        response = self.conn.table("inventory").select("*").eq("status", "In Stock").execute()
+        return response.data
 
-    def consume_ingredients(self, ingredient_names):
-        """
-        Smart Consumption: 
-        - Decrements quantity if > 1
-        - Marks 'Consumed' if = 1
-        - Returns (report_text, list_of_depleted_items)
-        """
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        report = [] 
-        depleted_items = []
-        
-        for ingredient in ingredient_names:
-            search_term = ingredient.lower().replace("frozen", "").strip()
+    def delete_item(self, item_id):
+        """Deletes an item from the cloud."""
+        return self.conn.table("inventory").delete().eq("id", item_id).execute()
 
-            # FIFO: Find OLDEST 'In Stock' item
-            cursor.execute("""
-                SELECT id, item_name, quantity, storage, unit 
-                FROM inventory 
-                WHERE item_name LIKE ? 
-                AND status='In Stock'
-                ORDER BY expiry_date ASC
-                LIMIT 1
-            """, (f'%{search_term}%',))
-            
-            match = cursor.fetchone()
-            
-            if match:
-                item_id, db_name, qty, storage, unit = match
-                
-                if qty > 1:
-                    new_qty = qty - 1
-                    cursor.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, item_id))
-                    report.append(f"Used 1 {unit} of '{db_name}'. Remaining: {new_qty}")
-                else:
-                    # Item is GONE
-                    cursor.execute("UPDATE inventory SET status='Consumed' WHERE id=?", (item_id,))
-                    report.append(f"Finished '{db_name}' ({storage})")
-                    depleted_items.append(db_name)
-            else:
-                report.append(f"⚠️ '{ingredient}' not found in fridge")
-        
-        conn.commit()
-        conn.close()
-        return report, depleted_items
+    def add_to_shopping_list(self, name, estimated_price=0.0):
+        """Adds an item to the shopping list table."""
+        # Note: Ensure you have a 'shopping_list' table in Supabase as well
+        item_data = {
+            "item_name": name.lower(),
+            "estimated_price": estimated_price
+        }
+        return self.conn.table("shopping_list").insert(item_data).execute()
