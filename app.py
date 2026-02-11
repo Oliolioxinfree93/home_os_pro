@@ -3,6 +3,24 @@ import sqlite3
 import pandas as pd
 from datetime import date, datetime, timedelta
 import json
+import os
+
+# --- AUTO-SETUP DATABASE (The Fix for Cloud Deployment) ---
+# This runs once when the app wakes up to ensure the database exists.
+if not os.path.exists('home.db'):
+    try:
+        from create_db import create_database
+        from demo_data import load_demo
+        
+        # 1. Build the empty tables
+        create_database()
+        
+        # 2. Load sample data so the app isn't empty (Optional)
+        load_demo()
+        print("✅ Database automatically initialized.")
+    except ImportError:
+        st.error("❌ Critical Error: create_db.py or demo_data.py is missing.")
+        st.stop()
 
 # --- IMPORT MODULES ---
 from inventory_manager import InventoryManager
@@ -28,7 +46,7 @@ def get_managers():
         'budget': BudgetManager(DB_NAME),
         'nutrition': NutritionTracker(DB_NAME),
         'savings': SavingsTracker(DB_NAME),
-        'receipt': ReceiptScanner() # The AI Vision Scanner
+        'receipt': ReceiptScanner()
     }
 
 managers = get_managers()
