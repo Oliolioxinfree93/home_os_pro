@@ -12,9 +12,12 @@ st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide")
 # --- SUPABASE CONNECTION ---
 @st.cache_resource
 def get_supabase():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except:
+        return None
 
 supabase = get_supabase()
 
@@ -24,35 +27,38 @@ def create_auth_json():
     The login library insists on a physical file. 
     We create one temporarily using values from st.secrets.
     """
-    creds = {
-        "web": {
-            "client_id": st.secrets["auth"]["client_id"],
-            "client_secret": st.secrets["auth"]["client_secret"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
+    if not os.path.exists("google_credentials.json"):
+        creds = {
+            "web": {
+                "client_id": st.secrets["auth"]["client_id"],
+                "client_secret": st.secrets["auth"]["client_secret"],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
+            }
         }
-    }
-    with open("google_credentials.json", "w") as f:
-        json.dump(creds, f)
+        with open("google_credentials.json", "w") as f:
+            json.dump(creds, f)
     return "google_credentials.json"
 
-# --- AUTHENTICATION SETUP (No Cache!) ---
+# --- AUTHENTICATION SETUP (NO CACHE!) ---
 def get_authenticator():
-    # 1. Generate the JSON file the library wants
+    # 1. Generate the JSON file
     json_path = create_auth_json()
     
     # 2. Create the authenticator
+    # REMOVED @st.cache_resource to fix the "Spinning" bug
     return Authenticate(
         secret_credentials_path=json_path,
-        cookie_name='home_os_auth',
+        cookie_name='home_os_auth_v2', # Changed name to force a fresh cookie
         cookie_key='home_os_secret_key_2024',
         redirect_uri=st.secrets['auth']['redirect_uri']
     )
 
 # Initialize Auth
 authenticator = get_authenticator()
-# Check status immediately
+
+# Check status
 authenticator.check_authentification()
 
 # --- LOGIN SCREEN ---
@@ -125,7 +131,7 @@ def db_get_inventory():
             .execute()
         return pd.DataFrame(response.data) if response.data else pd.DataFrame()
     except Exception as e:
-        st.error(f"Error loading inventory: {e}")
+        # st.error(f"Error loading inventory: {e}") 
         return pd.DataFrame()
 
 def db_add_item(raw_name, quantity=1, price=0.0, store=None, barcode=None):
@@ -165,7 +171,7 @@ def db_get_shopping_list():
             df['category'] = df['item_name'].apply(lambda x: logic.normalize_item(x)['category'])
         return df
     except Exception as e:
-        st.error(f"Error loading shopping list: {e}")
+        # st.error(f"Error loading shopping list: {e}")
         return pd.DataFrame()
 
 def db_add_to_shopping_list(item_name, estimated_price=0.0):
