@@ -19,34 +19,36 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# --- AUTHENTICATION (The "Script B" / No-File Method) ---
+# --- AUTHENTICATION SINGLETON ---
 def get_authenticator():
     if 'authenticator' in st.session_state:
         return st.session_state['authenticator']
 
-    # Pass secrets DIRECTLY. No JSON file needed.
+    # Create new instance if one doesn't exist
     auth_instance = Authenticate(
-        secret_credentials_path=None, # We are not using a file
+        secret_credentials_path=None,
         client_id=st.secrets["auth"]["client_id"],
         client_secret=st.secrets["auth"]["client_secret"],
         redirect_uri=st.secrets["auth"]["redirect_uri"],
-        cookie_name='home_os_v6', # New cookie name to force a clean start
-        cookie_key='secure_key_v6',
+        cookie_name='home_os_v7', # Bump version to force clean cookies
+        cookie_key='secure_key_v7',
         cookie_expiry_days=30
     )
     st.session_state['authenticator'] = auth_instance
     return auth_instance
 
-# --- AUTH FLOW ---
+# --- THE FIX: CONDITIONAL AUTH CHECK ---
 authenticator = get_authenticator()
 
-# Check auth status once. Catch errors to prevent crashes on stale codes.
-try:
-    authenticator.check_authentification()
-except Exception:
-    pass
+# STOP THE LOOP: Only check auth if we aren't already connected.
+# This prevents the app from re-processing the auth code on every rerun.
+if not st.session_state.get('connected'):
+    try:
+        authenticator.check_authentification()
+    except Exception:
+        pass
 
-# --- LOGIN CHECK ---
+# --- LOGIN FLOW ---
 def check_login():
     # 1. Dev Bypass
     if st.session_state.get('dev_mode'):
@@ -228,11 +230,11 @@ def db_consume_ingredients(ingredient_names):
 st.sidebar.title("🏠 Home OS Pro")
 if user_picture: st.sidebar.image(user_picture, width=40)
 st.sidebar.markdown(f"**Welcome, {user_name.split()[0]}!** 👋")
+
+# THE FIX: Clean Logout that clears ALL session state
 if st.sidebar.button("🚪 Sign Out", use_container_width=True):
-    st.session_state['dev_mode'] = False
-    st.session_state['connected'] = False
-    authenticator.logout()
-    st.rerun()
+    st.session_state.clear() # Wipes the slate clean
+    st.rerun() # Reruns app -> checks auth -> finds nothing -> shows login
 
 st.sidebar.markdown("---")
 savings = db_calculate_savings()
