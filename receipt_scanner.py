@@ -6,7 +6,6 @@ import streamlit as st
 class ReceiptScanner:
     def __init__(self):
         try:
-            # 1. Get API Key securely from Streamlit Cloud
             self.api_key = st.secrets["GOOGLE_API_KEY"]
             genai.configure(api_key=self.api_key)
             self.active = True
@@ -14,75 +13,54 @@ class ReceiptScanner:
             self.active = False
             print(f"Scanner Init Error: {e}")
 
+    def get_available_models(self):
+        """
+        DIAGNOSTIC: Asks Google 'What models can I use?'
+        """
+        try:
+            valid_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    valid_models.append(m.name)
+            return valid_models
+        except Exception as e:
+            return [f"Error listing models: {str(e)}"]
+
     def scan_receipt(self, image_file):
-        """
-        Scans a receipt image using Google Gemini Vision.
-        Returns a JSON list of items found.
-        """
         if not self.active:
-            return {"error": "API Key missing. Please add GOOGLE_API_KEY to Streamlit Secrets."}
+            return {"error": "API Key missing. Check Streamlit Secrets."}
 
         try:
-            # 1. Load the image
             img = PIL.Image.open(image_file)
 
-            # 2. The Prompt for the AI
             prompt = """
-            You are a receipt scanner for a home inventory app.
-            Analyze this image. Extract all purchased grocery items.
+            Analyze this receipt image. Extract all purchased grocery items.
+            Return ONLY a valid JSON array of objects.
+            Each object must have:
+            - "item": (string) Clean name (e.g., "Milk")
+            - "price": (float) Price
+            - "qty": (int) Quantity (default 1)
+            - "category": (string) Guess category (Dairy, Produce, Meat, Pantry, Other)
             
-            Return ONLY a raw JSON array. Do not use Markdown code blocks.
-            
-            Each object in the array must have:
-            - "item": (string) The clean name of the product (e.g., "Organic Bananas").
-            - "price": (float) The price of the item. If unknown, use 0.0.
-            - "qty": (int) The quantity found. Default to 1.
-            - "category": (string) One of: [Dairy, Produce, Meat, Pantry, Bakery, Frozen, Other].
-            
-            Ignore tax, subtotal, and payment details.
+            Return ONLY the JSON. No markdown formatting.
             """
 
-            # 3. Model Fallback Logic (The "Safety Net")
-            # We try the fastest model first. If it fails (404/Not Found), we try the next one.
-            models_to_try = [
-                'gemini-1.5-flash',  # Fast & Cheap (Best for receipts)
-                'gemini-1.5-pro',    # Smarter but slower
-                'gemini-pro-vision', # Older vision model
-                'gemini-pro'         # Standard text/multimodal
-            ]
-
-            response = None
-            last_error = None
-
-            for model_name in models_to_try:
-                try:
-                    # Initialize the specific model
-                    model = genai.GenerativeModel(model_name)
-                    
-                    # Attempt to generate content
-                    response = model.generate_content([prompt, img])
-                    
-                    # If we get here, it worked! Break the loop.
-                    break
-                except Exception as e:
-                    # If this model failed, save the error and try the next one
-                    last_error = e
-                    continue
-
-            # 4. If all models failed, return the error
-            if not response:
-                return {"error": f"All AI models failed. Last error: {str(last_error)}"}
-
-            # 5. Clean and Parse the JSON
-            # AI sometimes wraps the response in ```json ... ```. We strip that out.
-            raw_text = response.text
-            clean_text = raw_text.replace("```json", "").replace("```", "").strip()
-            
+            # 1. Try the most stable model first
+            # Note: We use the full path 'models/gemini-1.5-flash'
             try:
-                data = json.loads(clean_text)
-                return data
-            except json.JSONDecodeError:
-                return {"error": "AI response was not valid JSON. Try again."}
+                model = genai.GenerativeModel('models/gemini-1.5-flash')
+                response = model.generate_content([prompt, img])
+            except Exception as e:
+                # 2. IF FAILED: Run Diagnostic
+                available = self.get_available_models()
+                return {"error": f"❌ Model Failed. \n\nYOUR AVAILABLE MODELS:\n" + "\n".join(available)}
+
+            # 3. Clean and Parse
+            text = response.text.replace("```json", "").replace("```", "").strip()
+            try:
+                return json.loads(text)
+            except:
+                return {"error": "AI response was not valid JSON."}
 
         except Exception as e:
-            return {"error": f"Critical Scan Error: {str(e)}"}
+            return {"error": f"Critical Error: {str(e)}"}
