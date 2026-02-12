@@ -498,28 +498,58 @@ with tab3:
         if current_date.isoformat() in week_plan:
             for meal in week_plan[current_date.isoformat()]:
                 with st.container(border=True):
-                    c1, c2 = st.columns([1,4])
+                    c1, c2, c3 = st.columns([1, 4, 1])
                     c1.write(f"**{meal['meal_type'].title()}**")
                     c2.write(meal['recipe_name'])
+                    if c3.button("🗑️", key=f"del_meal_{meal['id']}"):
+                        supabase.table("meal_plan").delete().eq("id", meal['id']).eq("user_id", user_id).execute()
+                        st.rerun()
 
 with tab4:
     st.header(t('recipe_rescue_title'))
-    st.caption(t('recipe_subtitle'))
+
+    # Two recipe modes
+    mode_en = ["🚨 Use Expiring Food", "🧊 Use Full Inventory"]
+    mode_es = ["🚨 Usar Comida por Vencer", "🧊 Usar Todo el Inventario"]
+    mode_labels = mode_es if st.session_state['lang'] == 'es' else mode_en
+    recipe_mode = st.radio(
+        "Find recipes based on:" if st.session_state['lang'] == 'en' else "Buscar recetas usando:",
+        mode_labels,
+        horizontal=True
+    )
 
     if st.button(t('find_recipes'), type="primary"):
         try:
-            expiring = supabase.table("inventory").select("item_name").eq("user_id", user_id).eq("status", "In Stock").lte("expiry_date", (date.today() + timedelta(days=7)).isoformat()).execute()
-            if expiring.data:
-                from recipe_manager import suggest_recipes_from_list
-                with st.spinner("🤖 Finding recipes..." if st.session_state['lang'] == 'en' else "🤖 Buscando recetas..."):
-                    ingredients = list(set([r['item_name'] for r in expiring.data]))
+            from recipe_manager import suggest_recipes_from_list
+
+            if recipe_mode == mode_labels[0]:
+                # Expiring soon — within 7 days
+                r = supabase.table("inventory").select("item_name").eq("user_id", user_id).eq("status", "In Stock").lte("expiry_date", (date.today() + timedelta(days=7)).isoformat()).execute()
+                if r.data:
+                    ingredients = list(set([i['item_name'] for i in r.data]))
+                    label = "expiring"
+                else:
+                    st.info(t('no_expiring'))
+                    ingredients = []
+            else:
+                # Full inventory
+                r = supabase.table("inventory").select("item_name").eq("user_id", user_id).eq("status", "In Stock").execute()
+                if r.data:
+                    ingredients = list(set([i['item_name'] for i in r.data]))
+                    label = "inventory"
+                else:
+                    st.info(t('fridge_empty'))
+                    ingredients = []
+
+            if ingredients:
+                spinner_msg = "🤖 Finding recipes..." if st.session_state['lang'] == 'en' else "🤖 Buscando recetas..."
+                with st.spinner(spinner_msg):
                     st.session_state['recipes'] = suggest_recipes_from_list(
                         ingredients,
                         lang=st.session_state['lang']
                     )
                     st.session_state['recipe_ingredients'] = ingredients
-            else:
-                st.info(t('no_expiring'))
+
         except Exception as e:
             st.error(f"Error: {e}")
 
