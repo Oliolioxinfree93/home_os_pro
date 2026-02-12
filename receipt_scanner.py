@@ -1,15 +1,13 @@
-import google.generativeai as genai
 import json
 import PIL.Image
 import streamlit as st
+import base64
+import requests
 
 class ReceiptScanner:
     def __init__(self):
         try:
             self.api_key = st.secrets["GOOGLE_API_KEY"]
-            genai.configure(api_key=self.api_key)
-            # Use the correct current model name
-            self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
             self.active = True
         except Exception as e:
             self.active = False
@@ -20,27 +18,59 @@ class ReceiptScanner:
             return {"error": "API Key missing. Add GOOGLE_API_KEY to Streamlit Secrets."}
 
         try:
+            # Convert image to base64
             img = PIL.Image.open(image_file)
-            prompt = """
-            Analyze this receipt image. Extract all grocery/food items only.
-            Ignore taxes, totals, subtotals, fees, and store info lines.
-            Return ONLY a valid JSON array of objects.
-            Format:
-            [
-              {"item": "Milk", "price": 4.99, "qty": 1, "category": "Dairy"},
-              {"item": "Chicken Breast", "price": 8.99, "qty": 1, "category": "Meat"}
-            ]
-            Categories must be one of: Dairy, Meat, Produce, Bakery, Pantry, Frozen, Beverages, Snacks, Other
-            Return ONLY the JSON array. No markdown, no explanation, no extra text.
-            """
-            response = self.model.generate_content([prompt, img])
-            raw_text = response.text.strip()
-            # Clean up any markdown formatting
-            if raw_text.startswith("```"):
+            # Resize if too large
+            img.thumbnail((1024, 1024))
+            import io
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG")
+            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            prompt = """Analyze this receipt image. Extract all grocery/food items only.
+Ignore taxes, totals, subtotals, fees, and store info lines.
+Return ONLY a valid JSON array of objects like this:
+[{"item": "Milk", "price": 4.99, "qty": 1, "category": "Dairy"}]
+Categories: Dairy, Meat, Produce, Bakery, Pantry, Frozen, Beverages, Snacks, Other
+Return ONLY the JSON array. No markdown, no explanation."""
+
+            # Call Gemini API directly via REST (bypasses library version issues)
+            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": img_base64
+                            }
+                        }
+                    ]
+                }]
+            }
+
+            response = requests.post(url, json=payload)
+            
+            if response.status_code != 200:
+                # Try gemini-pro-vision as fallback
+                url2 = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent?key={self.api_key}"
+                response = requests.post(url2, json=payload)
+                
+            if response.status_code != 200:
+                return {"error": f"API Error {response.status_code}: {response.text[:200]}"}
+
+            result = response.json()
+            raw_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+            
+            # Clean markdown if present
+            if "```" in raw_text:
                 raw_text = raw_text.split("```")[1]
                 if raw_text.startswith("json"):
                     raw_text = raw_text[4:]
             raw_text = raw_text.strip()
+            
             return json.loads(raw_text)
 
         except json.JSONDecodeError:
