@@ -505,39 +505,94 @@ with tab3:
 with tab4:
     st.header(t('recipe_rescue_title'))
     st.caption(t('recipe_subtitle'))
+
     if st.button(t('find_recipes'), type="primary"):
         try:
             expiring = supabase.table("inventory").select("item_name").eq("user_id", user_id).eq("status", "In Stock").lte("expiry_date", (date.today() + timedelta(days=7)).isoformat()).execute()
             if expiring.data:
                 from recipe_manager import suggest_recipes_from_list
-                st.session_state['recipes'] = suggest_recipes_from_list(list(set([r['item_name'] for r in expiring.data])))
+                with st.spinner("🤖 Finding recipes..." if st.session_state['lang'] == 'en' else "🤖 Buscando recetas..."):
+                    ingredients = list(set([r['item_name'] for r in expiring.data]))
+                    st.session_state['recipes'] = suggest_recipes_from_list(
+                        ingredients,
+                        lang=st.session_state['lang']
+                    )
+                    st.session_state['recipe_ingredients'] = ingredients
             else:
                 st.info(t('no_expiring'))
         except Exception as e:
             st.error(f"Error: {e}")
+
     if 'recipes' in st.session_state:
         recipes = st.session_state['recipes']
         if isinstance(recipes, list):
             for r in recipes:
                 with st.container(border=True):
-                    c1, c2 = st.columns([1,3])
+                    c1, c2 = st.columns([1, 3])
                     c1.image(r['image'], width=120)
                     with c2:
                         st.subheader(r['title'])
-                        used = [i['name'] for i in r['usedIngredients']]
-                        missed = [i['name'] for i in r['missedIngredients']]
-                        st.caption(f"{t('uses')} {', '.join(used)}")
+                        # Time and difficulty badges
+                        if r.get('time') or r.get('difficulty'):
+                            badge_col1, badge_col2, _ = st.columns([1, 1, 3])
+                            if r.get('time'): badge_col1.caption(f"⏱️ {r['time']}")
+                            if r.get('difficulty'): badge_col2.caption(f"📊 {r['difficulty']}")
+
+                        used = [i['name'] for i in r.get('usedIngredients', [])]
+                        missed = [i['name'] for i in r.get('missedIngredients', [])]
+                        if used: st.caption(f"{t('uses')} {', '.join(used)}")
                         if missed: st.caption(f"{t('needs')} {', '.join(missed)}")
-                        b1, b2 = st.columns(2)
+
+                        # Brief instructions preview
+                        if r.get('instructions'):
+                            st.caption(f"📝 {r['instructions']}")
+
+                        b1, b2, b3 = st.columns(3)
+
+                        # Add missing to shopping list
                         if missed and b1.button(t('add_missing'), key=f"s_{r['id']}"):
-                            for m in missed: db_add_to_shopping_list(m)
+                            for m in missed:
+                                db_add_to_shopping_list(m)
                             st.toast("✅")
-                        if b2.button(t('cook_this'), key=f"c_{r['id']}"):
-                            report, _ = db_consume_ingredients(used)
+
+                        # Get full recipe details
+                        if b2.button("📖 Full Recipe" if st.session_state['lang'] == 'en' else "📖 Receta Completa", key=f"detail_{r['id']}"):
+                            from recipe_manager import get_recipe_details
+                            with st.spinner("Loading..." if st.session_state['lang'] == 'en' else "Cargando..."):
+                                details = get_recipe_details(
+                                    r['title'],
+                                    st.session_state.get('recipe_ingredients', used),
+                                    lang=st.session_state['lang']
+                                )
+                                st.session_state[f"details_{r['id']}"] = details
+
+                        # Cook this — mark ingredients as consumed
+                        if b3.button(t('cook_this'), key=f"c_{r['id']}"):
+                            report, depleted = db_consume_ingredients(used)
                             st.balloons()
-                            for line in report: st.write(f"• {line}")
+                            for line in report:
+                                st.write(f"• {line}")
+                            if depleted:
+                                for item in depleted:
+                                    db_add_to_shopping_list(item)
+                                st.toast("🛒 Added depleted items to shopping list!")
+
+                        # Show full recipe details if loaded
+                        if f"details_{r['id']}" in st.session_state:
+                            details = st.session_state[f"details_{r['id']}"]
+                            if "error" not in details:
+                                with st.expander("📖 Full Recipe", expanded=True):
+                                    st.markdown(f"**Servings:** {details.get('servings', 4)} | **Time:** {details.get('time', '30 min')}")
+                                    st.markdown("**Ingredients:**")
+                                    for ing in details.get('ingredients', []):
+                                        st.write(f"• {ing.get('amount', '')} {ing.get('item', '')}")
+                                    st.markdown("**Instructions:**")
+                                    for i, step in enumerate(details.get('steps', []), 1):
+                                        st.write(f"{i}. {step}")
+                                    if details.get('tips'):
+                                        st.info(f"💡 {details['tips']}")
         else:
-            st.warning(t('no_recipes'))
+            st.warning(recipes.get('error', t('no_recipes')))
 
 with tab5:
     st.header(t('analytics_title'))
