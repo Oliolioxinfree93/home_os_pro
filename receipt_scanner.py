@@ -9,7 +9,6 @@ class ReceiptScanner:
     def __init__(self):
         try:
             self.api_key = st.secrets["GOOGLE_API_KEY"]
-            self.model = "models/gemini-2.0-flash"
             self.active = True
         except Exception as e:
             self.active = False
@@ -27,12 +26,32 @@ class ReceiptScanner:
             img.save(buffer, format="JPEG")
             img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-            prompt = """Analyze this receipt image. Extract all grocery/food items only.
-Ignore taxes, totals, subtotals, fees, and store info lines.
-Return ONLY a valid JSON array of objects like this:
-[{"item": "Milk", "price": 4.99, "qty": 1, "category": "Dairy"}]
+            prompt = """You are reading a grocery store receipt. Many receipts (especially Walmart) 
+use abbreviated or coded product names. Your job is to decode them into real food names.
+
+Examples of Walmart abbreviations to decode:
+- "GV WHL MLK 1G" → "Whole Milk 1 Gallon"
+- "FZ CHKN BRST" → "Frozen Chicken Breast"  
+- "BNLS SKNLS CKN" → "Boneless Skinless Chicken"
+- "GV SLCD WHT BRD" → "White Bread"
+- "LG EGGS 18CT" → "Eggs 18 count"
+- "BTRMLK PNCKE MX" → "Buttermilk Pancake Mix"
+- "GV" or "SE" or "MM" at start = store brand, ignore the prefix
+- Numbers at end like "1G" "2L" "32OZ" = size, include it
+
+Rules:
+1. Extract ONLY food and grocery items
+2. Skip: taxes, fees, totals, subtotals, rewards, store name, cashier info
+3. Decode abbreviations into plain English product names
+4. If you cannot decode something, make your best guess based on context
+5. Include the price for each item
+
+Return ONLY a valid JSON array:
+[{"item": "Whole Milk 1 Gallon", "price": 3.98, "qty": 1, "category": "Dairy"}]
+
 Categories: Dairy, Meat, Produce, Bakery, Pantry, Frozen, Beverages, Snacks, Other
-Return ONLY the JSON array. No markdown, no explanation."""
+
+Return ONLY the JSON array. No markdown, no explanation, no extra text."""
 
             url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={self.api_key}"
 
@@ -47,7 +66,10 @@ Return ONLY the JSON array. No markdown, no explanation."""
                             }
                         }
                     ]
-                }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.1  # Low temperature = more precise, less creative
+                }
             }
 
             response = requests.post(url, json=payload)
@@ -66,9 +88,20 @@ Return ONLY the JSON array. No markdown, no explanation."""
                     raw_text = raw_text[4:]
             raw_text = raw_text.strip()
 
-            return json.loads(raw_text)
+            items = json.loads(raw_text)
+            
+            # Clean up item names — remove common store brand prefixes
+            prefixes_to_remove = ["GV ", "SE ", "MM ", "EQ ", "MV ", "PL "]
+            for item in items:
+                name = item['item']
+                for prefix in prefixes_to_remove:
+                    if name.upper().startswith(prefix):
+                        name = name[len(prefix):]
+                item['item'] = name.title().strip()
+            
+            return items
 
         except json.JSONDecodeError:
-            return {"error": "Could not read receipt. Try a clearer photo with better lighting."}
+            return {"error": "Could not read receipt. Try a clearer, well-lit photo."}
         except Exception as e:
             return {"error": f"Scan failed: {str(e)}"}
