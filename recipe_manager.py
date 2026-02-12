@@ -23,7 +23,10 @@ def suggest_recipes_from_list(ingredients, lang='en'):
         language_instruction = "Respond in English."
         cuisine_note = "Suggest practical home-cooking recipes, not overly fancy dishes."
 
-    ingredients_str = ", ".join(ingredients)
+    # If too many ingredients, take a smart subset
+    # Prioritize shorter names (more likely to be real ingredients vs barcodes)
+    cleaned = sorted(ingredients, key=lambda x: len(x))[:12]
+    ingredients_str = ", ".join(cleaned)
 
     prompt = f"""You are a helpful home cooking assistant. {language_instruction}
 
@@ -120,7 +123,10 @@ def get_recipe_details(recipe_title, ingredients, lang='en'):
     else:
         language_instruction = "Respond in English."
 
-    ingredients_str = ", ".join(ingredients)
+    # If too many ingredients, take a smart subset
+    # Prioritize shorter names (more likely to be real ingredients vs barcodes)
+    cleaned = sorted(ingredients, key=lambda x: len(x))[:12]
+    ingredients_str = ", ".join(cleaned)
 
     prompt = f"""{language_instruction}
 
