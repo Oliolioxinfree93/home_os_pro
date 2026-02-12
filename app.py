@@ -442,16 +442,79 @@ with tab1:
         c2.metric(t('expiring_soon'), len(df[df['days_left'] < 4]), delta_color="inverse")
         c3.metric(t('total_value'), f"${df['price'].sum():.2f}")
         c4.metric(t('frozen'), len(df[df['storage'] == 'frozen']))
+
         for _, row in df.iterrows():
             with st.container(border=True):
-                c1, c2, c3, c4, c5 = st.columns([3, 2, 1.5, 1.5, 1])
+                c1, c2, c3, c4, c5, c6 = st.columns([3, 2, 1.5, 1.5, 1, 1])
                 c1.markdown(f"**{row['item_name'].title()}**")
                 if row.get('decision_reason'): c1.caption(f"ℹ️ {row['decision_reason']}")
                 days = row['days_left']
                 c2.write(t('expired_ago', abs(days)) if days < 0 else t('expires_in', days) if days < 4 else t('good', days))
                 c3.caption(f"{row['quantity']} {row['unit']} ({row['storage']})")
                 if row.get('price'): c4.write(f"${row['price']:.2f}")
-                if c5.button("🗑️", key=f"del_{row['id']}"): db_delete_item(row['id']); st.rerun()
+
+                # Edit button
+                edit_key = f"editing_{row['id']}"
+                if c5.button("✏️", key=f"edit_btn_{row['id']}"):
+                    st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+                if c6.button("🗑️", key=f"del_{row['id']}"):
+                    db_delete_item(row['id'])
+                    st.rerun()
+
+                # Edit form — shows inline when pencil clicked
+                if st.session_state.get(edit_key, False):
+                    with st.form(key=f"edit_form_{row['id']}"):
+                        st.markdown("**✏️ Edit Item**" if st.session_state['lang'] == 'en' else "**✏️ Editar Producto**")
+                        ec1, ec2, ec3 = st.columns(3)
+                        new_name = ec1.text_input(
+                            "Name" if st.session_state['lang'] == 'en' else "Nombre",
+                            value=row['item_name'].title()
+                        )
+                        new_price = ec2.number_input(
+                            "Price ($)" if st.session_state['lang'] == 'en' else "Precio ($)",
+                            value=float(row['price']) if row.get('price') else 0.0,
+                            step=0.01, min_value=0.0
+                        )
+                        new_qty = ec3.number_input(
+                            "Quantity" if st.session_state['lang'] == 'en' else "Cantidad",
+                            value=float(row['quantity']) if row.get('quantity') else 1.0,
+                            step=1.0, min_value=0.0
+                        )
+                        ec4, ec5 = st.columns(2)
+                        new_store = ec4.text_input(
+                            "Store" if st.session_state['lang'] == 'en' else "Tienda",
+                            value=row.get('store', '') or ''
+                        )
+                        new_expiry = ec5.date_input(
+                            "Expiry Date" if st.session_state['lang'] == 'en' else "Fecha de Vencimiento",
+                            value=row['expiry_date']
+                        )
+                        save_col, cancel_col = st.columns(2)
+                        save = save_col.form_submit_button(
+                            "💾 Save" if st.session_state['lang'] == 'en' else "💾 Guardar",
+                            use_container_width=True
+                        )
+                        cancel = cancel_col.form_submit_button(
+                            "Cancel" if st.session_state['lang'] == 'en' else "Cancelar",
+                            use_container_width=True
+                        )
+                        if save:
+                            try:
+                                supabase.table("inventory").update({
+                                    "item_name": new_name.lower(),
+                                    "price": new_price,
+                                    "quantity": new_qty,
+                                    "store": new_store,
+                                    "expiry_date": new_expiry.isoformat()
+                                }).eq("id", row['id']).eq("user_id", user_id).execute()
+                                st.session_state[edit_key] = False
+                                st.toast("✅ Saved!" if st.session_state['lang'] == 'en' else "✅ ¡Guardado!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                        if cancel:
+                            st.session_state[edit_key] = False
+                            st.rerun()
     else:
         st.info(t('fridge_empty'))
 
@@ -474,6 +537,27 @@ with tab2:
                         db_move_to_fridge(row['item_name'], price=price)
                         st.toast(f"{t('bought')} {row['item_name']}!")
                         st.rerun()
+                    # Edit name inline
+                    edit_sl_key = f"edit_sl_{row['id']}"
+                    if c4.button("✏️", key=f"edit_sl_btn_{row['id']}"):
+                        st.session_state[edit_sl_key] = not st.session_state.get(edit_sl_key, False)
+                    if st.session_state.get(edit_sl_key, False):
+                        with st.form(f"edit_sl_form_{row['id']}"):
+                            new_sl_name = st.text_input(
+                                "Item name" if st.session_state['lang'] == 'en' else "Nombre",
+                                value=row['item_name'].title()
+                            )
+                            sl_save, sl_cancel = st.columns(2)
+                            if sl_save.form_submit_button("💾 Save" if st.session_state['lang'] == 'en' else "💾 Guardar"):
+                                supabase.table("shopping_list").update({
+                                    "item_name": new_sl_name.lower()
+                                }).eq("id", row['id']).eq("user_id", user_id).execute()
+                                st.session_state[edit_sl_key] = False
+                                st.toast("✅ Updated!")
+                                st.rerun()
+                            if sl_cancel.form_submit_button("Cancel" if st.session_state['lang'] == 'en' else "Cancelar"):
+                                st.session_state[edit_sl_key] = False
+                                st.rerun()
                     if c4.button("❌", key=f"rem_{row['id']}"): db_delete_item(row['id'], "shopping_list"); st.rerun()
     else:
         st.success(t('shopping_list_empty'))
