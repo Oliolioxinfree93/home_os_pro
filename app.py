@@ -5,13 +5,20 @@ from supabase import create_client
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from translations import get_text
 import os
 import json
 
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# --- APP CONFIG ---
 st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide")
+
+# --- LANGUAGE SELECTOR ---
+if 'lang' not in st.session_state:
+    st.session_state['lang'] = 'en'
+
+def t(key, *args):
+    return get_text(st.session_state['lang'], key, *args)
 
 # --- SUPABASE ---
 @st.cache_resource
@@ -46,15 +53,11 @@ def get_flow():
     )
 
 def check_login():
-    # Dev mode
     if st.session_state.get('dev_mode'):
         return st.session_state.get('user_id', 'dev@example.com')
-
-    # Already logged in
     if st.session_state.get('user_id'):
         return st.session_state['user_id']
 
-    # Google redirected back with code
     query_params = st.query_params
     if "code" in query_params:
         try:
@@ -79,21 +82,30 @@ def check_login():
                 st.rerun()
             st.stop()
 
-    # Show login screen
+    # Language selector on login page
+    col_lang1, col_lang2, col_lang3 = st.columns([3, 1, 1])
+    with col_lang2:
+        if st.button("🇺🇸 English", use_container_width=True,
+                     type="primary" if st.session_state['lang'] == 'en' else "secondary"):
+            st.session_state['lang'] = 'en'
+            st.rerun()
+    with col_lang3:
+        if st.button("🇲🇽 Español", use_container_width=True,
+                     type="primary" if st.session_state['lang'] == 'es' else "secondary"):
+            st.session_state['lang'] = 'es'
+            st.rerun()
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("# 🏠 Home OS Pro")
-        st.markdown("### See the real value you bring to your family")
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f"# 🏠 {t('app_title')}")
+        st.markdown(f"### {t('app_tagline')}")
         st.markdown("---")
-        st.markdown("""
-**What you'll track:**
-
-💰 Money saved through smart shopping  
-🍳 Meals cooked vs. eating out  
-♻️ Food waste prevented  
-💼 Your monthly household impact
-        """)
+        st.markdown(t('login_track'))
+        st.markdown(t('login_savings'))
+        st.markdown(t('login_meals'))
+        st.markdown(t('login_waste'))
+        st.markdown(t('login_impact'))
         st.markdown("---")
 
         try:
@@ -103,13 +115,13 @@ def check_login():
                 access_type="offline",
                 include_granted_scopes="false"
             )
-            st.link_button("🔑 Continue with Google", auth_url, use_container_width=True)
-            st.caption("Your data is private. Only you can see your fridge.")
+            st.link_button(f"🔑 {t('sign_in_google')}", auth_url, use_container_width=True)
+            st.caption(t('login_private'))
         except Exception as e:
             st.error(f"Auth setup error: {e}")
 
         st.markdown("---")
-        if st.button("🛠️ Dev Mode", use_container_width=True):
+        if st.button(t('dev_mode'), use_container_width=True):
             st.session_state['dev_mode'] = True
             st.session_state['user_id'] = 'dev@example.com'
             st.session_state['user_name'] = 'Developer'
@@ -118,12 +130,11 @@ def check_login():
 
     st.stop()
 
-# --- INIT USER ---
+# --- INIT ---
 user_id = check_login()
 user_name = st.session_state.get('user_name', 'Friend')
 user_picture = st.session_state.get('user_picture', '')
 
-# --- IMPORTS ---
 from inventory_logic import InventoryLogic
 from barcode_scanner import BarcodeScanner
 from receipt_scanner import ReceiptScanner
@@ -271,99 +282,114 @@ def db_consume_ingredients(ingredient_names):
     return report, depleted
 
 # --- SIDEBAR ---
-st.sidebar.title("🏠 Home OS Pro")
+st.sidebar.title(f"🏠 {t('app_title')}")
+
+# Language toggle in sidebar
+lang_col1, lang_col2 = st.sidebar.columns(2)
+with lang_col1:
+    if st.button("🇺🇸 EN", use_container_width=True,
+                 type="primary" if st.session_state['lang'] == 'en' else "secondary"):
+        st.session_state['lang'] = 'en'
+        st.rerun()
+with lang_col2:
+    if st.button("🇲🇽 ES", use_container_width=True,
+                 type="primary" if st.session_state['lang'] == 'es' else "secondary"):
+        st.session_state['lang'] = 'es'
+        st.rerun()
+
+st.sidebar.markdown("---")
 if user_picture:
     st.sidebar.image(user_picture, width=40)
-st.sidebar.markdown(f"**Welcome, {user_name.split()[0]}!** 👋")
-if st.sidebar.button("🚪 Sign Out", use_container_width=True):
+st.sidebar.markdown(f"**{t('welcome')}, {user_name.split()[0]}!** 👋")
+if st.sidebar.button(t('sign_out'), use_container_width=True):
     st.session_state.clear()
     st.rerun()
 
 st.sidebar.markdown("---")
 savings = db_calculate_savings()
-st.sidebar.subheader("💪 Monthly Impact")
+st.sidebar.subheader(t('monthly_impact'))
 if savings['total_monthly_savings'] > 0:
-    st.sidebar.success(f"🎉 Saved: ${savings['total_monthly_savings']:.2f}")
+    st.sidebar.success(f"{t('saved_this_month')}: ${savings['total_monthly_savings']:.2f}")
     st.sidebar.progress(min(savings['total_monthly_savings'] / 500, 1.0))
 else:
-    st.sidebar.info("💡 Add groceries to see your impact!")
+    st.sidebar.info(t('add_groceries_prompt'))
 
 st.sidebar.markdown("---")
 scanner = BarcodeScanner()
 receipt_scanner_obj = ReceiptScanner()
 
-with st.sidebar.expander("➕ Quick Add / Scan", expanded=True):
-    qa_tab1, qa_tab2, qa_tab3 = st.tabs(["⌨️ Type", "📱 Barcode", "📸 Receipt"])
+with st.sidebar.expander(t('quick_add'), expanded=True):
+    qa_tab1, qa_tab2, qa_tab3 = st.tabs([t('tab_type'), t('tab_barcode'), t('tab_receipt')])
     with qa_tab1:
         with st.form("add_form"):
-            new_item = st.text_input("Item Name")
-            qty = st.number_input("Quantity", 1, 100, 1)
-            price_input = st.number_input("Price ($)", 0.0, 1000.0, 0.0, step=0.01)
-            store_input = st.text_input("Store (optional)")
-            dest = st.radio("Add to:", ["Fridge", "Shopping List"])
-            if st.form_submit_button("Add Item"):
+            new_item = st.text_input(t('item_name'))
+            qty = st.number_input(t('quantity'), 1, 100, 1)
+            price_input = st.number_input(t('price'), 0.0, 1000.0, 0.0, step=0.01)
+            store_input = st.text_input(t('store'))
+            dest = st.radio(t('add_to'), [t('fridge'), t('shopping_list')])
+            if st.form_submit_button(t('add_item')):
                 if new_item:
-                    if dest == "Fridge":
+                    if dest == t('fridge'):
                         db_add_item(new_item, qty, price_input, store_input)
                         if price_input > 0: db_record_purchase(new_item, price_input, store_input)
-                        st.toast(f"✅ Added {new_item}!")
+                        st.toast(f"{t('added_to_fridge')} {new_item}!")
                     else:
                         db_add_to_shopping_list(new_item, price_input)
-                        st.toast("✅ Added to list!")
+                        st.toast(t('added_to_list'))
                     st.rerun()
     with qa_tab2:
-        barcode_input = st.text_input("Enter UPC/EAN")
-        if st.button("🔍 Lookup"):
+        barcode_input = st.text_input(t('enter_barcode'))
+        if st.button(t('lookup')):
             if barcode_input:
-                with st.spinner("Scanning..."):
+                with st.spinner(t('scanning')):
                     product = scanner.lookup_barcode(barcode_input)
                     if product:
-                        st.success(f"Found: **{product['name']}**")
-                        if st.button("Add to Fridge"):
+                        st.success(f"{t('found')}: **{product['name']}**")
+                        if st.button(t('add_to_fridge')):
                             db_add_item(product['name'])
                             st.rerun()
-                    else: st.error("Not found")
+                    else: st.error(t('not_found'))
     with qa_tab3:
-        img_file = st.camera_input("Take Photo")
-        if not img_file: img_file = st.file_uploader("Or Upload", type=['jpg','png','jpeg'])
+        img_file = st.camera_input(t('take_photo'))
+        if not img_file: img_file = st.file_uploader(t('or_upload'), type=['jpg','png','jpeg'])
         if img_file:
-            if st.button("🚀 Process Receipt"):
-                with st.spinner("AI reading receipt..."):
+            if st.button(t('process_receipt')):
+                with st.spinner(t('reading_receipt')):
                     results = receipt_scanner_obj.scan_receipt(img_file)
                     st.session_state['scan_results'] = results
         if 'scan_results' in st.session_state:
             results = st.session_state['scan_results']
             if "error" in results: st.info(results['error'])
             else:
-                st.success(f"Found {len(results)} items!")
+                st.success(t('found_items', len(results)))
                 with st.form("receipt_review"):
                     selected = []
                     for i, item in enumerate(results):
                         c1, c2 = st.columns([3,1])
                         c1.write(f"**{item['item']}** (${item['price']})")
-                        if c2.checkbox("Add", value=True, key=f"scan_{i}"): selected.append(item)
-                    store_name = st.text_input("Store", "Grocery Store")
-                    if st.form_submit_button("✅ Save Selected"):
+                        if c2.checkbox("✓", value=True, key=f"scan_{i}"): selected.append(item)
+                    store_name = st.text_input(t('store_name'), "Walmart")
+                    if st.form_submit_button(t('save_selected')):
                         for item in selected:
                             db_add_item(item['item'], quantity=item.get('qty',1), price=item['price'], store=store_name)
                             db_record_purchase(item['item'], item['price'], store=store_name)
-                        st.toast(f"Saved {len(selected)} items!")
+                        st.toast(f"{t('save_selected')}!")
                         del st.session_state['scan_results']
                         st.rerun()
 
-# --- TABS ---
+# --- MAIN TABS ---
 tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "💪 My Impact", "🧊 Fridge", "🛒 Shopping List",
-    "📅 Meal Planner", "👨‍🍳 Recipe Rescue", "📊 Analytics"
+    t('tab_impact'), t('tab_fridge'), t('tab_shopping'),
+    t('tab_meals'), t('tab_recipes'), t('tab_analytics')
 ])
 
 with tab0:
-    st.title(f"💪 {user_name.split()[0]}'s Household Impact")
-    st.caption("The real economic value you bring to your family every month")
+    st.title(f"💪 {user_name.split()[0]}{t('impact_title')}")
+    st.caption(t('impact_subtitle'))
     col1, col2, col3 = st.columns(3)
-    col1.metric("💰 This Month Saved", f"${savings['total_monthly_savings']:.2f}", "Direct cash retained")
-    col2.metric("🍳 Meals Cooked", f"{savings['meals_cooked']} meals", f"${savings['meals_cooked'] * 35:.2f} vs. eating out")
-    col3.metric("📈 Annual Projection", f"${savings['annual_projection']:.2f}")
+    col1.metric(t('this_month_saved'), f"${savings['total_monthly_savings']:.2f}", t('direct_cash_retained'))
+    col2.metric(t('meals_cooked'), f"{savings['meals_cooked']}", f"${savings['meals_cooked']*35:.2f} {t('vs_eating_out')}")
+    col3.metric(t('annual_projection'), f"${savings['annual_projection']:.2f}")
     st.markdown("---")
     c1, c2 = st.columns(2)
     chef_value = savings['meals_cooked'] * 35
@@ -371,25 +397,32 @@ with tab0:
     admin_value = 100.0
     total_value = chef_value + shopper_value + admin_value
     with c1:
-        st.markdown("**💸 Direct Savings**")
-        st.write(f"🍳 Meal planning: **${savings['meal_planning_savings']:.2f}**")
-        st.write(f"🛒 Smart shopping: **${savings['smart_shopping_savings']:.2f}**")
-        st.write(f"♻️ Waste prevention: **${savings['food_waste_prevention']:.2f}**")
+        st.markdown(t('direct_savings'))
+        st.write(f"{t('meal_planning')} **${savings['meal_planning_savings']:.2f}**")
+        st.caption(t('cooked_vs_restaurant'))
+        st.write(f"{t('smart_shopping')} **${savings['smart_shopping_savings']:.2f}**")
+        st.caption(t('saved_delivery'))
+        st.write(f"{t('waste_prevention')} **${savings['food_waste_prevention']:.2f}**")
+        st.caption(t('food_saved_expiring'))
     with c2:
-        st.markdown("**💼 Labor Value**")
-        st.write(f"👨‍🍳 Chef services: **${chef_value:.2f}**")
-        st.write(f"🛒 Personal shopper: **${shopper_value:.2f}**")
-        st.write(f"🧮 Admin work: **${admin_value:.2f}**")
+        st.markdown(t('labor_value'))
+        st.write(f"{t('chef_services')} **${chef_value:.2f}**")
+        st.write(f"{t('personal_shopper')} **${shopper_value:.2f}**")
+        st.write(f"{t('admin_work')} **${admin_value:.2f}**")
     st.markdown("---")
-    st.success(f"### 🌟 You added ${total_value:.2f} in value this month.\n\n📈 Annual projection: ${total_value*12:,.2f}")
+    st.success(t('bottom_line', f"{total_value:.2f}", f"{total_value*12:,.2f}"))
     achievements = []
-    if savings['food_waste_prevention'] >= 25: achievements.append(("♻️", "Waste Warrior", f"Prevented ${savings['food_waste_prevention']:.2f}!"))
-    if savings['smart_shopping_savings'] >= 30: achievements.append(("🎯", "Deal Hunter", f"Saved ${savings['smart_shopping_savings']:.2f}!"))
-    if savings['meals_cooked'] >= 10: achievements.append(("👨‍🍳", "Meal Prep Master", f"{savings['meals_cooked']} meals cooked!"))
-    if savings['total_monthly_savings'] >= 100: achievements.append(("💪", "Budget Hero", f"${savings['total_monthly_savings']:.2f} saved!"))
+    if savings['food_waste_prevention'] >= 25:
+        achievements.append(("♻️", t('waste_warrior'), t('waste_warrior_desc', f"{savings['food_waste_prevention']:.2f}")))
+    if savings['smart_shopping_savings'] >= 30:
+        achievements.append(("🎯", t('deal_hunter'), t('deal_hunter_desc', f"{savings['smart_shopping_savings']:.2f}")))
+    if savings['meals_cooked'] >= 10:
+        achievements.append(("👨‍🍳", t('meal_prep_master'), t('meal_prep_master_desc', savings['meals_cooked'])))
+    if savings['total_monthly_savings'] >= 100:
+        achievements.append(("💪", t('budget_hero'), t('budget_hero_desc', f"{savings['total_monthly_savings']:.2f}")))
     if achievements:
         st.markdown("---")
-        st.subheader("🏆 Achievements")
+        st.subheader(t('achievements'))
         cols = st.columns(len(achievements))
         for i, (icon, title, desc) in enumerate(achievements):
             with cols[i]:
@@ -397,7 +430,7 @@ with tab0:
                 st.caption(desc)
 
 with tab1:
-    st.header("🧊 Your Fridge")
+    st.header(t('your_fridge'))
     df = db_get_inventory()
     if not df.empty:
         df['expiry_date'] = pd.to_datetime(df['expiry_date']).dt.date
@@ -405,28 +438,28 @@ with tab1:
         df['days_left'] = (df['expiry_date'] - today).apply(lambda x: x.days)
         df = df.sort_values('days_left')
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("In Stock", len(df))
-        c2.metric("Expiring Soon", len(df[df['days_left'] < 4]), delta_color="inverse")
-        c3.metric("Total Value", f"${df['price'].sum():.2f}")
-        c4.metric("Frozen", len(df[df['storage'] == 'frozen']))
+        c1.metric(t('in_stock'), len(df))
+        c2.metric(t('expiring_soon'), len(df[df['days_left'] < 4]), delta_color="inverse")
+        c3.metric(t('total_value'), f"${df['price'].sum():.2f}")
+        c4.metric(t('frozen'), len(df[df['storage'] == 'frozen']))
         for _, row in df.iterrows():
             with st.container(border=True):
                 c1, c2, c3, c4, c5 = st.columns([3, 2, 1.5, 1.5, 1])
                 c1.markdown(f"**{row['item_name'].title()}**")
                 if row.get('decision_reason'): c1.caption(f"ℹ️ {row['decision_reason']}")
                 days = row['days_left']
-                c2.write(f"🔴 Expired {abs(days)}d ago" if days < 0 else f"🟠 Expires in {days}d" if days < 4 else f"🟢 Good ({days}d)")
+                c2.write(t('expired_ago', abs(days)) if days < 0 else t('expires_in', days) if days < 4 else t('good', days))
                 c3.caption(f"{row['quantity']} {row['unit']} ({row['storage']})")
                 if row.get('price'): c4.write(f"${row['price']:.2f}")
                 if c5.button("🗑️", key=f"del_{row['id']}"): db_delete_item(row['id']); st.rerun()
     else:
-        st.info("Your fridge is empty! Add items using the sidebar.")
+        st.info(t('fridge_empty'))
 
 with tab2:
-    st.header("🛒 Shopping List")
+    st.header(t('shopping_list_title'))
     shop_df = db_get_shopping_list()
     if not shop_df.empty:
-        st.metric("Items to Buy", len(shop_df))
+        st.metric(t('items_to_buy'), len(shop_df))
         for cat in sorted(shop_df['category'].unique()):
             st.markdown(f"### {cat}")
             for _, row in shop_df[shop_df['category'] == cat].iterrows():
@@ -434,25 +467,34 @@ with tab2:
                     c1, c2, c3, c4 = st.columns([3, 1.5, 1, 1])
                     c1.write(f"**{row['item_name'].title()}**")
                     if row.get('estimated_price'): c1.caption(f"Est. ${row['estimated_price']:.2f}")
-                    price = c2.number_input("Price", 0.0, 1000.0, float(row['estimated_price']) if row.get('estimated_price') else 0.0, step=0.01, key=f"p_{row['id']}")
-                    if c3.button("✅", key=f"buy_{row['id']}"): db_move_to_fridge(row['item_name'], price=price); st.toast(f"✅ Bought!"); st.rerun()
+                    price = c2.number_input(t('price'), 0.0, 1000.0,
+                        float(row['estimated_price']) if row.get('estimated_price') else 0.0,
+                        step=0.01, key=f"p_{row['id']}")
+                    if c3.button(t('got_it'), key=f"buy_{row['id']}"):
+                        db_move_to_fridge(row['item_name'], price=price)
+                        st.toast(f"{t('bought')} {row['item_name']}!")
+                        st.rerun()
                     if c4.button("❌", key=f"rem_{row['id']}"): db_delete_item(row['id'], "shopping_list"); st.rerun()
     else:
-        st.success("✅ Shopping list is empty!")
+        st.success(t('shopping_list_empty'))
 
 with tab3:
-    st.header("📅 Weekly Meal Planner")
-    start_date = st.date_input("Week Starting", value=date.today() - timedelta(days=date.today().weekday()))
+    st.header(t('meal_planner_title'))
+    start_date = st.date_input(t('week_starting'), value=date.today() - timedelta(days=date.today().weekday()))
     week_plan = db_get_meal_plan(start_date)
-    for i, day_name in enumerate(['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']):
+    meal_types = [t('breakfast'), t('lunch'), t('dinner'), t('snack')]
+    day_names_en = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+    day_names_es = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']
+    day_names = day_names_es if st.session_state['lang'] == 'es' else day_names_en
+    for i, day_name in enumerate(day_names):
         current_date = start_date + timedelta(days=i)
         st.subheader(f"{day_name} — {current_date.strftime('%b %d')}")
-        with st.expander("➕ Add meal"):
+        with st.expander(t('add_meal')):
             with st.form(f"meal_{i}"):
-                m_type = st.selectbox("Type", ['breakfast','lunch','dinner','snack'])
-                r_name = st.text_input("Meal Name")
-                if st.form_submit_button("Save"):
-                    if r_name: db_add_meal(current_date, m_type, r_name); st.toast("Added!"); st.rerun()
+                m_type = st.selectbox(t('meal_type'), meal_types)
+                r_name = st.text_input(t('meal_name'))
+                if st.form_submit_button(t('save')):
+                    if r_name: db_add_meal(current_date, m_type, r_name); st.toast(t('meal_added')); st.rerun()
         if current_date.isoformat() in week_plan:
             for meal in week_plan[current_date.isoformat()]:
                 with st.container(border=True):
@@ -461,15 +503,16 @@ with tab3:
                     c2.write(meal['recipe_name'])
 
 with tab4:
-    st.header("👨‍🍳 Recipe Rescue")
-    if st.button("🆘 Find Recipes Using Expiring Food", type="primary"):
+    st.header(t('recipe_rescue_title'))
+    st.caption(t('recipe_subtitle'))
+    if st.button(t('find_recipes'), type="primary"):
         try:
             expiring = supabase.table("inventory").select("item_name").eq("user_id", user_id).eq("status", "In Stock").lte("expiry_date", (date.today() + timedelta(days=7)).isoformat()).execute()
             if expiring.data:
                 from recipe_manager import suggest_recipes_from_list
                 st.session_state['recipes'] = suggest_recipes_from_list(list(set([r['item_name'] for r in expiring.data])))
             else:
-                st.info("No food expiring soon! 🎉")
+                st.info(t('no_expiring'))
         except Exception as e:
             st.error(f"Error: {e}")
     if 'recipes' in st.session_state:
@@ -483,39 +526,39 @@ with tab4:
                         st.subheader(r['title'])
                         used = [i['name'] for i in r['usedIngredients']]
                         missed = [i['name'] for i in r['missedIngredients']]
-                        st.caption(f"✨ Uses: {', '.join(used)}")
-                        if missed: st.caption(f"🛒 Needs: {', '.join(missed)}")
+                        st.caption(f"{t('uses')} {', '.join(used)}")
+                        if missed: st.caption(f"{t('needs')} {', '.join(missed)}")
                         b1, b2 = st.columns(2)
-                        if missed and b1.button("Add Missing", key=f"s_{r['id']}"):
+                        if missed and b1.button(t('add_missing'), key=f"s_{r['id']}"):
                             for m in missed: db_add_to_shopping_list(m)
-                            st.toast("Added!")
-                        if b2.button("🔥 Cook This", key=f"c_{r['id']}"):
+                            st.toast("✅")
+                        if b2.button(t('cook_this'), key=f"c_{r['id']}"):
                             report, _ = db_consume_ingredients(used)
                             st.balloons()
                             for line in report: st.write(f"• {line}")
         else:
-            st.warning(recipes.get('error', 'No recipes found.'))
+            st.warning(t('no_recipes'))
 
 with tab5:
-    st.header("📊 Analytics")
+    st.header(t('analytics_title'))
     budget = db_get_budget()
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("💰 Budget")
+        st.subheader(t('budget_title'))
         limit = float(budget.get('budget_limit', 500))
         spent = float(budget.get('current_spent', 0))
-        st.metric("Monthly Budget", f"${limit:.2f}")
-        st.metric("Spent", f"${spent:.2f}", delta=f"${limit-spent:.2f} remaining")
+        st.metric(t('monthly_budget'), f"${limit:.2f}")
+        st.metric(t('spent_this_month'), f"${spent:.2f}", delta=f"${limit-spent:.2f} {t('remaining')}")
         st.progress(min(spent/limit, 1.0) if limit > 0 else 0)
-        with st.expander("⚙️ Update Budget"):
+        with st.expander(t('update_budget')):
             with st.form("budget_form"):
-                new_b = st.number_input("New Budget ($)", 0.0, 10000.0, limit)
-                if st.form_submit_button("Update"):
+                new_b = st.number_input(t('new_budget'), 0.0, 10000.0, limit)
+                if st.form_submit_button(t('update')):
                     supabase.table("budget_settings").update({"budget_limit": new_b, "current_spent": 0}).eq("user_id", user_id).execute()
-                    st.toast("Updated!")
+                    st.toast(t('updated'))
                     st.rerun()
     with c2:
-        st.subheader("📈 Spending by Category")
+        st.subheader(t('spending_by_category'))
         try:
             ph = supabase.table("price_history").select("item_name, price").eq("user_id", user_id).execute()
             if ph.data:
@@ -526,9 +569,9 @@ with tab5:
                 fig = px.pie(df_ph.groupby('category')['price'].sum().reset_index(), values='price', names='category')
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("Add purchases to see breakdown.")
+                st.info(t('add_purchases'))
         except:
-            st.info("Add purchases to see analytics.")
+            st.info(t('add_purchases'))
 
 st.markdown("---")
-st.caption("Home OS Pro | Built with ❤️ for stay-at-home parents")
+st.caption(t('built_with_love'))
