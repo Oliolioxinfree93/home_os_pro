@@ -37,7 +37,11 @@ def get_flow():
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [REDIRECT_URI]
         }},
-        scopes=["openid", "email", "profile"],
+        scopes=[
+            "openid",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile"
+        ],
         redirect_uri=REDIRECT_URI
     )
 
@@ -60,7 +64,8 @@ def check_login():
             user_info = id_token.verify_oauth2_token(
                 credentials.id_token,
                 google_requests.Request(),
-                st.secrets["auth"]["client_id"]
+                st.secrets["auth"]["client_id"],
+                clock_skew_in_seconds=10
             )
             st.session_state['user_id'] = user_info['email']
             st.session_state['user_name'] = user_info.get('name', 'Friend')
@@ -95,7 +100,8 @@ def check_login():
             flow = get_flow()
             auth_url, _ = flow.authorization_url(
                 prompt="select_account",
-                access_type="offline"
+                access_type="offline",
+                include_granted_scopes="false"
             )
             st.link_button("🔑 Continue with Google", auth_url, use_container_width=True)
             st.caption("Your data is private. Only you can see your fridge.")
