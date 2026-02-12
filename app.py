@@ -381,7 +381,7 @@ with tab0:
         st.write(f"🛒 Personal shopper: **${shopper_value:.2f}**")
         st.write(f"🧮 Admin work: **${admin_value:.2f}**")
     st.markdown("---")
-    st.success(f"### 🌟 You added **${total_value:.2f}** in value this month. Annual: **${total_value*12:,.2f}**")
+    st.success(f"### 🌟 You added ${total_value:.2f} in value this month.\n\n📈 Annual projection: ${total_value*12:,.2f}")
     achievements = []
     if savings['food_waste_prevention'] >= 25: achievements.append(("♻️", "Waste Warrior", f"Prevented ${savings['food_waste_prevention']:.2f}!"))
     if savings['smart_shopping_savings'] >= 30: achievements.append(("🎯", "Deal Hunter", f"Saved ${savings['smart_shopping_savings']:.2f}!"))
