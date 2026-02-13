@@ -91,14 +91,23 @@ label,
 [data-testid="stSidebar"] .stButton > button {
     background: var(--forest) !important;
     color: white !important;
+    -webkit-text-fill-color: white !important;
     border: none !important;
     border-radius: 8px !important;
+    font-weight: 500 !important;
+    opacity: 1 !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+    background: #3d6b1f !important;
+    opacity: 1 !important;
 }
 [data-testid="stSidebar"] .stFormSubmitButton > button {
     background: var(--gold) !important;
     color: white !important;
+    -webkit-text-fill-color: white !important;
     border: none !important;
     font-weight: 600 !important;
+    opacity: 1 !important;
 }
 
 /* ── TYPOGRAPHY ── */
@@ -209,6 +218,18 @@ input[type="email"] {
 .stProgress > div > div {
     background: var(--sage) !important;
     border-radius: 99px !important;
+}
+
+/* ── SIDEBAR SECONDARY BUTTONS (e.g. inactive language toggle) ── */
+[data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+    background: white !important;
+    color: var(--forest) !important;
+    -webkit-text-fill-color: var(--forest) !important;
+    border: 2px solid var(--forest) !important;
+    font-weight: 500 !important;
+}
+[data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+    background: var(--gold-light) !important;
 }
 
 /* ── EXPANDER ── */
