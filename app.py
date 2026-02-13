@@ -8,6 +8,7 @@ from google.auth.transport import requests as google_requests
 from translations import get_text
 from styles import get_css
 from report_generator import generate_monthly_report
+from fridge_animation import get_fridge_animation, get_pantry_animation
 import os
 import json
 import streamlit.components.v1 as components
@@ -156,6 +157,12 @@ from receipt_scanner import ReceiptScanner
 def db_get_inventory():
     try:
         r = supabase.table("inventory").select("*").eq("user_id", user_id).eq("status", "In Stock").execute()
+        return pd.DataFrame(r.data) if r.data else pd.DataFrame()
+    except: return pd.DataFrame()
+
+def db_get_pantry():
+    try:
+        r = supabase.table("inventory").select("*").eq("user_id", user_id).eq("status", "In Stock").eq("storage", "pantry").execute()
         return pd.DataFrame(r.data) if r.data else pd.DataFrame()
     except: return pd.DataFrame()
 
@@ -339,13 +346,33 @@ with st.sidebar.expander(t('quick_add'), expanded=True):
             qty = st.number_input(t('quantity'), 1, 100, 1)
             price_input = st.number_input(t('price'), 0.0, 1000.0, 0.0, step=0.01)
             store_input = st.text_input(t('store'))
-            dest = st.radio(t('add_to'), [t('fridge'), t('shopping_list')])
+            pantry_label = "🏺 Pantry" if st.session_state['lang'] == 'en' else "🏺 Despensa"
+            dest = st.radio(t('add_to'), [t('fridge'), pantry_label, t('shopping_list')])
             if st.form_submit_button(t('add_item')):
                 if new_item:
                     if dest == t('fridge'):
                         db_add_item(new_item, qty, price_input, store_input)
                         if price_input > 0: db_record_purchase(new_item, price_input, store_input)
                         st.toast(f"{t('added_to_fridge')} {new_item}!")
+                    elif dest == pantry_label:
+                        # Force storage to pantry
+                        try:
+                            from inventory_logic import InventoryLogic
+                            from datetime import timedelta, datetime
+                            logic = InventoryLogic()
+                            a = logic.normalize_item(new_item)
+                            expiry = (datetime.now().date() + timedelta(days=180)).isoformat()  # pantry = 6mo default
+                            supabase.table("inventory").insert({
+                                "user_id": user_id, "item_name": a['clean_name'], "category": a['category'],
+                                "quantity": qty, "unit": a['unit'], "storage": "pantry",
+                                "date_added": date.today().isoformat(), "expiry_date": expiry,
+                                "status": "In Stock", "decision_reason": "Added to pantry",
+                                "price": price_input or 0, "store": store_input or "", "barcode": ""
+                            }).execute()
+                            if price_input > 0: db_record_purchase(new_item, price_input, store_input)
+                            st.toast(f"🏺 Added to pantry!")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
                     else:
                         db_add_to_shopping_list(new_item, price_input)
                         st.toast(t('added_to_list'))
@@ -391,9 +418,10 @@ with st.sidebar.expander(t('quick_add'), expanded=True):
                         st.rerun()
 
 # --- MAIN TABS ---
-tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    t('tab_impact'), t('tab_fridge'), t('tab_shopping'),
-    t('tab_meals'), t('tab_recipes'), t('tab_analytics')
+tab0, tab1, tab_pantry, tab2, tab3, tab4, tab5 = st.tabs([
+    t('tab_impact'), t('tab_fridge'),
+    "🏺 " + ("Pantry" if st.session_state['lang'] == 'en' else "Despensa"),
+    t('tab_shopping'), t('tab_meals'), t('tab_recipes'), t('tab_analytics')
 ])
 
 with tab0:
@@ -465,16 +493,29 @@ with tab0:
 with tab1:
     st.header(t('your_fridge'))
     df = db_get_inventory()
+    # Exclude pantry items from fridge view
+    if not df.empty and 'storage' in df.columns:
+        df = df[df['storage'] != 'pantry']
     if not df.empty:
         df['expiry_date'] = pd.to_datetime(df['expiry_date']).dt.date
         today = date.today()
         df['days_left'] = (df['expiry_date'] - today).apply(lambda x: x.days)
         df = df.sort_values('days_left')
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(t('in_stock'), len(df))
-        c2.metric(t('expiring_soon'), len(df[df['days_left'] < 4]), delta_color="inverse")
-        c3.metric(t('total_value'), f"${df['price'].sum():.2f}")
-        c4.metric(t('frozen'), len(df[df['storage'] == 'frozen']))
+
+        # Fridge animation
+        anim_col, list_col = st.columns([1, 2])
+        with anim_col:
+            items_for_anim = df[['item_name','days_left','storage','category']].to_dict('records')
+            components.html(
+                get_fridge_animation(items_for_anim, lang=st.session_state['lang']),
+                height=340
+            )
+        with list_col:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(t('in_stock'), len(df))
+            c2.metric(t('expiring_soon'), len(df[df['days_left'] < 4]), delta_color="inverse")
+            c3.metric(t('total_value'), f"${df['price'].sum():.2f}")
+            c4.metric(t('frozen'), len(df[df['storage'] == 'frozen']))
 
         for _, row in df.iterrows():
             with st.container(border=True):
@@ -550,6 +591,80 @@ with tab1:
                             st.rerun()
     else:
         st.info(t('fridge_empty'))
+
+with tab_pantry:
+    pantry_title = "🏺 Pantry" if st.session_state['lang'] == 'en' else "🏺 Despensa"
+    st.header(pantry_title)
+
+    pantry_df = db_get_pantry()
+
+    # Pantry animation — always show
+    if not pantry_df.empty:
+        pantry_df['expiry_date'] = pd.to_datetime(pantry_df['expiry_date']).dt.date
+        today = date.today()
+        pantry_df['days_left'] = (pantry_df['expiry_date'] - today).apply(lambda x: x.days)
+        pantry_items_anim = pantry_df[['item_name','days_left','category']].to_dict('records')
+    else:
+        pantry_items_anim = []
+
+    components.html(
+        get_pantry_animation(pantry_items_anim, lang=st.session_state['lang']),
+        height=max(200, min(80 + len(pantry_items_anim) * 12, 420))
+    )
+
+    st.markdown("---")
+
+    if not pantry_df.empty:
+        pa, pb, pc = st.columns(3)
+        pa.metric("📦 " + ("Items" if st.session_state['lang'] == 'en' else "Productos"), len(pantry_df))
+        pb.metric("⚠️ " + ("Expiring Soon" if st.session_state['lang'] == 'en' else "Por Vencer"),
+                  len(pantry_df[pantry_df['days_left'] < 14]))
+        pc.metric("💰 " + ("Value" if st.session_state['lang'] == 'en' else "Valor"),
+                  f"${pantry_df['price'].sum():.2f}")
+
+        st.markdown("### " + ("All Pantry Items" if st.session_state['lang'] == 'en' else "Todos los Productos"))
+        for _, row in pantry_df.sort_values('days_left').iterrows():
+            with st.container(border=True):
+                pc1, pc2, pc3, pc4, pc5, pc6 = st.columns([3, 2, 1.5, 1.5, 1, 1])
+                pc1.markdown(f"**{row['item_name'].title()}**")
+                if row.get('category'): pc1.caption(f"📂 {row['category']}")
+                days = row['days_left']
+                pc2.write(t('expired_ago', abs(days)) if days < 0 else t('expires_in', days) if days < 14 else t('good', days))
+                pc3.caption(f"{row['quantity']} {row['unit']}")
+                if row.get('price'): pc4.write(f"${row['price']:.2f}")
+
+                edit_key = f"editing_pantry_{row['id']}"
+                if pc5.button("✏️", key=f"edit_p_{row['id']}"):
+                    st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+                if pc6.button("🗑️", key=f"del_p_{row['id']}"):
+                    db_delete_item(row['id'])
+                    st.rerun()
+
+                if st.session_state.get(edit_key, False):
+                    with st.form(key=f"edit_pantry_{row['id']}"):
+                        ep1, ep2, ep3 = st.columns(3)
+                        new_name  = ep1.text_input("Name" if st.session_state['lang'] == 'en' else "Nombre", value=row['item_name'].title())
+                        new_price = ep2.number_input("Price ($)", value=float(row['price']) if row.get('price') else 0.0, step=0.01)
+                        new_qty   = ep3.number_input("Qty", value=float(row['quantity']) if row.get('quantity') else 1.0, step=1.0)
+                        new_expiry = st.date_input("Expiry" if st.session_state['lang'] == 'en' else "Vencimiento", value=row['expiry_date'])
+                        sv, cv = st.columns(2)
+                        if sv.form_submit_button("💾 Save" if st.session_state['lang'] == 'en' else "💾 Guardar"):
+                            supabase.table("inventory").update({
+                                "item_name": new_name.lower(), "price": new_price,
+                                "quantity": new_qty, "expiry_date": new_expiry.isoformat()
+                            }).eq("id", row['id']).eq("user_id", user_id).execute()
+                            st.session_state[edit_key] = False
+                            st.toast("✅ Saved!")
+                            st.rerun()
+                        if cv.form_submit_button("Cancel" if st.session_state['lang'] == 'en' else "Cancelar"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+    else:
+        st.info(
+            "🏺 Your pantry is empty. Add items using the sidebar and select 'Pantry' as the destination."
+            if st.session_state['lang'] == 'en' else
+            "🏺 Tu despensa está vacía. Agrega productos desde el menú y selecciona 'Despensa' como destino."
+        )
 
 with tab2:
     st.header(t('shopping_list_title'))
