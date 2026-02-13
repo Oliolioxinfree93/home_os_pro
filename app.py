@@ -563,6 +563,7 @@ with tab1:
 
         for _, row in df.iterrows():
             item_id = row['id']
+            edit_key = f"editing_{item_id}"
             is_selected = st.session_state['fridge_selected'] == item_id
             name = row['item_name'].replace('*','').strip().title()
             days = row['days_left']
@@ -606,7 +607,7 @@ with tab1:
                         st.toast(f"Moved to {new_cat}!")
                         st.rerun()
                     if a3.button("✏️ Edit", key=f"edit_btn_{item_id}"):
-                        st.session_state[f"editing_{item_id}"] = not st.session_state.get(f"editing_{item_id}", False)
+                        st.session_state[edit_key] = not st.session_state.get(edit_key, False)
                     if a4.button("🗑️ Del", key=f"del_{item_id}"):
                         db_delete_item(item_id)
                         st.session_state['fridge_selected'] = None
@@ -727,6 +728,7 @@ with tab_pantry:
 
         for _, row in pantry_df.sort_values(['category','days_left']).iterrows():
             item_id = row['id']
+            edit_key = f"editing_pantry_{item_id}"
             is_selected = st.session_state['pantry_selected'] == item_id
             name = row['item_name'].replace('*','').strip().title()
             days = row['days_left']
@@ -769,7 +771,7 @@ with tab_pantry:
                         st.toast(f"📦 Moved to {new_cat}!")
                         st.rerun()
                     if a3.button("✏️ Edit", key=f"edit_p_{item_id}"):
-                        st.session_state[f"editing_pantry_{item_id}"] = not st.session_state.get(f"editing_pantry_{item_id}", False)
+                        st.session_state[edit_key] = not st.session_state.get(edit_key, False)
                     if a4.button("🗑️ Del", key=f"del_p_{item_id}"):
                         db_delete_item(item_id)
                         st.session_state['pantry_selected'] = None
