@@ -503,12 +503,12 @@ with tab1:
         df = df.sort_values('days_left')
 
         # Fridge animation
-        anim_col, list_col = st.columns([1, 2])
+        anim_col, list_col = st.columns([2, 3])
         with anim_col:
             items_for_anim = df[['item_name','days_left','storage','category']].to_dict('records')
             components.html(
                 get_fridge_animation(items_for_anim, lang=st.session_state['lang']),
-                height=340
+                height=360
             )
         with list_col:
             c1, c2, c3, c4 = st.columns(4)
