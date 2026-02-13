@@ -31,8 +31,21 @@ html, body, [class*="css"] {
 }
 
 /* ── HIDE STREAMLIT DEFAULTS ── */
-#MainMenu, footer, header { visibility: hidden; }
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+header { visibility: hidden; }
 .stDeployButton { display: none; }
+
+/* Make sure sidebar toggle button stays visible */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[kind="header"],
+.st-emotion-cache-czk5ss,
+section[data-testid="stSidebarNav"] {
+    visibility: visible !important;
+    display: flex !important;
+    opacity: 1 !important;
+}
 
 /* ── APP HEADER ── */
 .block-container {
