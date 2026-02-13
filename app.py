@@ -9,7 +9,9 @@ from translations import get_text
 import os
 import json
 
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+# Only disable HTTPS requirement in local dev, never in production
+if os.getenv('ENV') == 'dev':
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide")
 
@@ -70,7 +72,12 @@ def check_login():
                 st.secrets["auth"]["client_id"],
                 clock_skew_in_seconds=10
             )
-            st.session_state['user_id'] = user_info['email']
+            if user_info.get('iss') not in ['accounts.google.com', 'https://accounts.google.com']:
+                raise ValueError("Invalid token issuer")
+            # Use 'sub' as user_id — Google's immutable unique ID (safer than email)
+            # Store email separately for display only
+            st.session_state['user_id'] = user_info['sub']
+            st.session_state['user_email'] = user_info['email']
             st.session_state['user_name'] = user_info.get('name', 'Friend')
             st.session_state['user_picture'] = user_info.get('picture', '')
             st.query_params.clear()
@@ -120,13 +127,15 @@ def check_login():
         except Exception as e:
             st.error(f"Auth setup error: {e}")
 
-        st.markdown("---")
-        if st.button(t('dev_mode'), use_container_width=True):
-            st.session_state['dev_mode'] = True
-            st.session_state['user_id'] = 'dev@example.com'
-            st.session_state['user_name'] = 'Developer'
-            st.session_state['user_picture'] = ''
-            st.rerun()
+        # Dev mode only visible in local development
+        if os.getenv('ENV') == 'dev':
+            st.markdown("---")
+            if st.button(t('dev_mode'), use_container_width=True):
+                st.session_state['dev_mode'] = True
+                st.session_state['user_id'] = 'dev@example.com'
+                st.session_state['user_name'] = 'Developer'
+                st.session_state['user_picture'] = ''
+                st.rerun()
 
     st.stop()
 
