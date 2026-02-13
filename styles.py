@@ -55,7 +55,15 @@ h3 { font-size: 1.2rem !important; }
     background: var(--forest) !important;
     border-right: none !important;
 }
-[data-testid="stSidebar"] * {
+
+/* All text in sidebar is light */
+[data-testid="stSidebar"],
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] div,
+[data-testid="stSidebar"] small,
+[data-testid="stSidebar"] .stMarkdown {
     color: var(--cream) !important;
 }
 [data-testid="stSidebar"] h1,
@@ -64,14 +72,105 @@ h3 { font-size: 1.2rem !important; }
     color: var(--gold-light) !important;
     font-family: 'Fraunces', serif !important;
 }
+
+/* Sidebar buttons */
 [data-testid="stSidebar"] .stButton button {
     background: rgba(255,255,255,0.12) !important;
     color: var(--cream) !important;
-    border: 1px solid rgba(255,255,255,0.2) !important;
+    border: 1px solid rgba(255,255,255,0.25) !important;
     border-radius: 8px !important;
 }
 [data-testid="stSidebar"] .stButton button:hover {
     background: rgba(255,255,255,0.22) !important;
+}
+
+/* Sidebar text inputs */
+[data-testid="stSidebar"] input[type="text"],
+[data-testid="stSidebar"] input[type="number"],
+[data-testid="stSidebar"] input {
+    background: rgba(255,255,255,0.15) !important;
+    color: white !important;
+    border: 1px solid rgba(255,255,255,0.3) !important;
+    border-radius: 6px !important;
+    -webkit-text-fill-color: white !important;
+}
+[data-testid="stSidebar"] input::placeholder {
+    color: rgba(255,255,255,0.45) !important;
+    -webkit-text-fill-color: rgba(255,255,255,0.45) !important;
+}
+
+/* Sidebar number input +/- buttons */
+[data-testid="stSidebar"] [data-testid="stNumberInput"] button {
+    background: rgba(255,255,255,0.15) !important;
+    color: white !important;
+    border-color: rgba(255,255,255,0.2) !important;
+}
+
+/* Sidebar radio buttons */
+[data-testid="stSidebar"] .stRadio label span,
+[data-testid="stSidebar"] .stRadio label p {
+    color: var(--cream) !important;
+}
+
+/* Sidebar selectbox */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {
+    background: rgba(255,255,255,0.15) !important;
+    color: white !important;
+    border-color: rgba(255,255,255,0.3) !important;
+}
+
+/* Sidebar tabs */
+[data-testid="stSidebar"] [role="tablist"] {
+    background: rgba(255,255,255,0.1) !important;
+    border-color: rgba(255,255,255,0.15) !important;
+}
+[data-testid="stSidebar"] [role="tab"] {
+    color: rgba(250,247,242,0.7) !important;
+    background: transparent !important;
+}
+[data-testid="stSidebar"] [role="tab"][aria-selected="true"] {
+    background: rgba(200,149,42,0.5) !important;
+    color: white !important;
+}
+
+/* Sidebar form submit button */
+[data-testid="stSidebar"] .stFormSubmitButton button,
+[data-testid="stSidebar"] .stForm button {
+    background: var(--gold) !important;
+    color: white !important;
+    font-weight: 600 !important;
+    border: none !important;
+}
+
+/* Sidebar expander */
+[data-testid="stSidebar"] [data-testid="stExpander"] {
+    background: rgba(255,255,255,0.08) !important;
+    border-color: rgba(255,255,255,0.15) !important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary span {
+    color: var(--cream) !important;
+}
+
+/* Sidebar file uploader */
+[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] {
+    background: rgba(255,255,255,0.1) !important;
+    border-color: rgba(255,255,255,0.25) !important;
+}
+
+/* Sidebar camera input */
+[data-testid="stSidebar"] [data-testid="stCameraInput"] button {
+    color: var(--cream) !important;
+}
+
+/* Sidebar checkbox */
+[data-testid="stSidebar"] .stCheckbox label span {
+    color: var(--cream) !important;
+}
+
+/* Sidebar toast and captions */
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] caption {
+    color: rgba(250,247,242,0.6) !important;
 }
 
 /* ── METRIC CARDS ── */
@@ -156,49 +255,6 @@ h3 { font-size: 1.2rem !important; }
 }
 
 /* ── INPUTS ── */
-/* Fix sidebar widget visibility */
-[data-testid="stSidebar"] .stTextInput input,
-[data-testid="stSidebar"] .stNumberInput input {
-    background: rgba(255,255,255,0.15) !important;
-    color: white !important;
-    border-color: rgba(255,255,255,0.25) !important;
-}
-[data-testid="stSidebar"] .stRadio label,
-[data-testid="stSidebar"] .stRadio div {
-    color: var(--cream) !important;
-}
-[data-testid="stSidebar"] .stSelectbox > div {
-    background: rgba(255,255,255,0.1) !important;
-    color: white !important;
-}
-/* Fix sidebar form submit button */
-[data-testid="stSidebar"] .stForm .stButton button {
-    background: var(--gold) !important;
-    color: white !important;
-    font-weight: 600 !important;
-}
-/* Fix sidebar tabs */
-[data-testid="stSidebar"] [role="tab"] {
-    color: var(--cream) !important;
-    background: rgba(255,255,255,0.08) !important;
-}
-[data-testid="stSidebar"] [role="tab"][aria-selected="true"] {
-    background: rgba(200,149,42,0.4) !important;
-    color: white !important;
-}
-/* Fix sidebar camera and file upload */
-[data-testid="stSidebar"] .stCameraInput,
-[data-testid="stSidebar"] .stFileUploader {
-    background: rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-}
-/* Fix number input spinners */
-[data-testid="stSidebar"] .stNumberInput button {
-    background: rgba(255,255,255,0.15) !important;
-    color: white !important;
-    border-color: rgba(255,255,255,0.2) !important;
-}
-
 .stTextInput input, .stNumberInput input, .stSelectbox select {
     border-radius: 8px !important;
     border: 1.5px solid var(--light-gray) !important;
