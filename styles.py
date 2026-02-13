@@ -139,9 +139,40 @@ h3 { font-size: 1.2rem !important; }
 
 /* ── INPUTS ── */
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+input[type="search"],
+textarea,
+select {
     border-radius: 8px !important;
     border: 1.5px solid var(--light-gray) !important;
+    background-color: white !important;
+    color: var(--charcoal) !important;
+    /* Fix iOS dark mode autofill black background */
+    -webkit-text-fill-color: var(--charcoal) !important;
+    -webkit-box-shadow: 0 0 0px 1000px white inset !important;
+    caret-color: var(--charcoal) !important;
+}
+
+/* Fix iOS/mobile dark mode forcing black on containers */
+@media (prefers-color-scheme: dark) {
+    html, body, [class*="css"],
+    .stApp, .main, section.main,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stHeader"] {
+        background-color: var(--cream) !important;
+        color: var(--charcoal) !important;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background: white !important;
+    }
+    [data-testid="stMetric"] {
+        background: white !important;
+    }
+    input, textarea, select {
+        background-color: white !important;
+        -webkit-text-fill-color: var(--charcoal) !important;
+        -webkit-box-shadow: 0 0 0px 1000px white inset !important;
+    }
 }
 
 /* ── PROGRESS BAR ── */
@@ -172,6 +203,30 @@ input[type="number"] {
     .block-container { padding: 1rem 0.8rem !important; }
     h1 { font-size: 1.6rem !important; }
     [data-testid="stMetricValue"] { font-size: 1.4rem !important; }
+}
+/* ── INPUTS ── */
+/* Force light mode on inputs — prevents iOS dark mode making them black */
+input, textarea, select,
+input[type="text"],
+input[type="number"] {
+    color-scheme: light !important;
+    background: white !important;
+    color: #2C2C2C !important;
+    -webkit-text-fill-color: #2C2C2C !important;
+    border-radius: 8px !important;
+    border: 1.5px solid var(--light-gray) !important;
+}
+/* Sidebar inputs stay readable on cream background */
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] textarea {
+    color-scheme: light !important;
+    background: white !important;
+    color: #2C2C2C !important;
+    -webkit-text-fill-color: #2C2C2C !important;
+}
+/* Overall page color scheme — tells browser this is a light theme */
+:root {
+    color-scheme: light !important;
 }
 </style>
 """
