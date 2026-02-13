@@ -759,7 +759,14 @@ with tab4:
         horizontal=True
     )
 
-    if st.button(t('find_recipes'), type="primary"):
+    find_btn_label = (
+        "🧊 Find Recipes From Inventory" if recipe_mode == mode_labels[1]
+        else "🚨 Find Recipes Using Expiring Food"
+    ) if st.session_state['lang'] == 'en' else (
+        "🧊 Buscar Recetas del Inventario" if recipe_mode == mode_labels[1]
+        else "🚨 Buscar Recetas con Comida por Vencer"
+    )
+    if st.button(find_btn_label, type="primary"):
         try:
             from recipe_manager import suggest_recipes_from_list
 
