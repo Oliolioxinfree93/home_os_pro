@@ -51,88 +51,37 @@ h2 { font-size: 1.6rem !important; }
 h3 { font-size: 1.2rem !important; }
 
 /* ── SIDEBAR ── */
+/* Light sidebar — avoids all the CSS fighting with Streamlit internals */
 [data-testid="stSidebar"] {
-    background: var(--forest) !important;
-    border-right: none !important;
+    background: #F5F0E8 !important;
+    border-right: 2px solid #E8E0D0 !important;
 }
-/* Headings */
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 {
-    color: var(--gold-light) !important;
+    color: var(--forest) !important;
     font-family: 'Fraunces', serif !important;
 }
-/* Paragraph text and markdown */
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] .stMarkdown p {
-    color: var(--cream) !important;
-}
-/* Labels on inputs and radios */
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] .stRadio label p,
-[data-testid="stSidebar"] .stCheckbox label p {
-    color: var(--cream) !important;
-}
-/* Buttons */
 [data-testid="stSidebar"] .stButton > button {
-    background: rgba(255,255,255,0.12) !important;
-    color: var(--cream) !important;
-    border: 1px solid rgba(255,255,255,0.25) !important;
+    background: var(--forest) !important;
+    color: white !important;
+    border: none !important;
     border-radius: 8px !important;
+    font-weight: 500 !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(255,255,255,0.22) !important;
+    background: #3d6b1f !important;
+    transform: translateY(-1px) !important;
 }
-/* Form submit button - gold */
 [data-testid="stSidebar"] .stFormSubmitButton > button {
     background: var(--gold) !important;
     color: white !important;
     border: none !important;
     font-weight: 600 !important;
 }
-/* Text inputs */
-[data-testid="stSidebar"] input {
-    background: rgba(255,255,255,0.12) !important;
-    color: white !important;
-    -webkit-text-fill-color: white !important;
-    border: 1px solid rgba(255,255,255,0.25) !important;
-}
-[data-testid="stSidebar"] input::placeholder {
-    -webkit-text-fill-color: rgba(255,255,255,0.4) !important;
-}
-/* Number input +/- */
-[data-testid="stSidebar"] [data-testid="stNumberInput"] > div > button {
-    background: rgba(255,255,255,0.12) !important;
-    color: white !important;
-    border-color: rgba(255,255,255,0.2) !important;
-}
-/* Tabs inside sidebar */
-[data-testid="stSidebar"] [data-testid="stTabs"] [role="tablist"] {
-    background: rgba(255,255,255,0.1) !important;
-    border-color: rgba(255,255,255,0.15) !important;
-}
-[data-testid="stSidebar"] [data-testid="stTabs"] [role="tab"] {
-    color: rgba(250,247,242,0.75) !important;
-}
 [data-testid="stSidebar"] [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    background: rgba(200,149,42,0.5) !important;
+    background: var(--forest) !important;
     color: white !important;
-}
-/* Expander */
-[data-testid="stSidebar"] [data-testid="stExpander"] {
-    background: rgba(255,255,255,0.07) !important;
-    border-color: rgba(255,255,255,0.15) !important;
-}
-[data-testid="stSidebar"] [data-testid="stExpander"] summary p {
-    color: var(--cream) !important;
-}
-/* Caption text */
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
-    color: rgba(250,247,242,0.55) !important;
-}
-/* Success/info boxes in sidebar */
-[data-testid="stSidebar"] [data-testid="stAlert"] p {
-    color: var(--charcoal) !important;
 }
 
 /* ── METRIC CARDS ── */
