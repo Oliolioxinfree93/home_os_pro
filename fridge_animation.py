@@ -49,7 +49,7 @@ def get_fridge_animation(items_data, lang='en'):
 
   .scene {{
     position: relative;
-    width: 340px;
+    width: 380px;
     height: 320px;
     perspective: 800px;
   }}
@@ -74,7 +74,7 @@ def get_fridge_animation(items_data, lang='en'):
     border-radius: 10px;
     padding: 10px;
     opacity: 0;
-    animation: fadeInInterior 0.4s ease 0.9s forwards;
+    animation: fadeInInterior 0.5s ease 0.6s forwards;
   }}
 
   .shelf {{
@@ -115,7 +115,7 @@ def get_fridge_animation(items_data, lang='en'):
     height: 100%;
     transform-origin: left center;
     transform-style: preserve-3d;
-    animation: openDoor 0.8s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+    animation: openDoor 1s cubic-bezier(0.4, 0, 0.2, 1) 0.2s forwards;
   }}
 
   .door-front {{
@@ -159,7 +159,8 @@ def get_fridge_animation(items_data, lang='en'):
   /* ── ANIMATIONS ── */
   @keyframes openDoor {{
     0%   {{ transform: rotateY(0deg); }}
-    100% {{ transform: rotateY(-75deg); }}
+    80% {{ transform: rotateY(-92deg); }}
+    100% {{ transform: rotateY(-88deg); }}
   }}
 
   @keyframes fadeInInterior {{
