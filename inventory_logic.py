@@ -59,7 +59,7 @@ class InventoryLogic:
             # Fallback for unknown items
             return {
                 "clean_name": raw_name,
-                "category": "Unknown",
+                "category": "Unsorted",
                 "unit": "unit",
                 "storage": storage_type,
                 "expiry_days": 7,
