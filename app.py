@@ -653,9 +653,12 @@ with tab_pantry:
     else:
         pantry_items_anim = []
 
+    # Calculate height: header + (shelf per category) + empty state
+    num_categories = len(set(i.get('category','') for i in pantry_items_anim)) if pantry_items_anim else 0
+    pantry_height = max(160, 80 + (num_categories * 110)) if num_categories else 160
     components.html(
         get_pantry_animation(pantry_items_anim, lang=st.session_state['lang']),
-        height=min(180 + len(pantry_items_anim) * 8, 300),
+        height=pantry_height,
         scrolling=False
     )
 
