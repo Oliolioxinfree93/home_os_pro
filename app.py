@@ -17,7 +17,7 @@ import streamlit.components.v1 as components
 if os.getenv('ENV') == 'dev':
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide", initial_sidebar_state="expanded")
 st.markdown(get_css(), unsafe_allow_html=True)
 
 # --- LANGUAGE SELECTOR ---
