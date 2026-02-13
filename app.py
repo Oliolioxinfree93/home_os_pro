@@ -545,63 +545,49 @@ with tab1:
         c3.metric(t('total_value'), f"${df['price'].sum():.2f}")
         c4.metric(t('frozen'), len(df[df['storage'] == 'frozen']))
 
-        # ── Interactive Fridge Visual ──
+        # ── Fridge door animation ──
         if 'fridge_selected' not in st.session_state:
             st.session_state['fridge_selected'] = None
 
-        st.markdown("""
-        <div style="background:linear-gradient(160deg,#e8e8e8,#d0d0d0);
-                    border-radius:16px; border:3px solid #b8b8b8;
-                    padding:14px 14px 10px; margin-bottom:12px;
-                    box-shadow:4px 4px 20px rgba(0,0,0,0.15);">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;
-                      color:#888;margin-bottom:10px;font-weight:600;">
-            🧊 Tap an item to select it
-          </div>
-        """, unsafe_allow_html=True)
+        anim_col, list_col = st.columns([2, 3])
+        with anim_col:
+            items_for_anim = df[['item_name','days_left','storage','category']].to_dict('records')
+            components.html(
+                get_fridge_animation(items_for_anim, lang=st.session_state['lang']),
+                height=300, scrolling=False
+            )
+        with list_col:
+            # Tappable item pills — grouped by shelf
+            st.caption("👆 " + ("Tap an item to select" if st.session_state['lang']=='en' else "Toca un artículo para seleccionar"))
+            shelves = [
+                ("⚠️", df[df['days_left'] < 4], "#e65100"),
+                ("✓", df[(df['days_left'] >= 4) & (df['storage'] != 'frozen')], "#2D5016"),
+                ("❄️", df[df['storage'] == 'frozen'], "#1565c0"),
+            ]
+            for icon, shelf_df, color in shelves:
+                if shelf_df.empty: continue
+                items_list = shelf_df.to_dict('records')
+                cols_per_row = 2
+                for row_start in range(0, len(items_list), cols_per_row):
+                    row_items = items_list[row_start:row_start+cols_per_row]
+                    pill_cols = st.columns(cols_per_row)
+                    for col_idx, item in enumerate(row_items):
+                        iid = item['id']
+                        iname = item['item_name'].replace('*','').strip().title()[:13]
+                        is_sel = st.session_state['fridge_selected'] == iid
+                        if pill_cols[col_idx].button(
+                            f"{icon} {'★ ' if is_sel else ''}{iname}",
+                            key=f"pill_f_{iid}",
+                            use_container_width=True,
+                            type="primary" if is_sel else "secondary"
+                        ):
+                            st.session_state['fridge_selected'] = None if is_sel else iid
+                            st.session_state[f"editing_{iid}"] = False
+                            st.rerun()
 
-        # Group items by shelf: Expiring, Fresh, Frozen
-        shelves = [
-            ("⚠️ " + ("Expiring Soon" if st.session_state['lang']=='en' else "Por Vencer"),
-             df[df['days_left'] < 4],
-             "#fff3e0", "#e65100"),
-            ("✓ " + ("Fresh" if st.session_state['lang']=='en' else "Frescos"),
-             df[(df['days_left'] >= 4) & (df['storage'] != 'frozen')],
-             "#e8f5e9", "#2D5016"),
-            ("❄️ " + ("Frozen" if st.session_state['lang']=='en' else "Congelados"),
-             df[df['storage'] == 'frozen'],
-             "#e3f2fd", "#1565c0"),
-        ]
-
-        for shelf_label, shelf_df, bg, color in shelves:
-            if shelf_df.empty:
-                continue
-            st.markdown(f'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:{color};font-weight:700;margin:6px 0 4px;">{shelf_label}</div>', unsafe_allow_html=True)
-            # Render items as tappable pills in rows
-            cols_per_row = 3
-            items_list = shelf_df.to_dict('records')
-            for row_start in range(0, len(items_list), cols_per_row):
-                row_items = items_list[row_start:row_start+cols_per_row]
-                pill_cols = st.columns(cols_per_row)
-                for col_idx, item in enumerate(row_items):
-                    iid = item['id']
-                    iname = item['item_name'].replace('*','').strip().title()[:14]
-                    is_sel = st.session_state['fridge_selected'] == iid
-                    btn_style = "primary" if is_sel else "secondary"
-                    if pill_cols[col_idx].button(
-                        f"{'★ ' if is_sel else ''}{iname}",
-                        key=f"pill_f_{iid}",
-                        use_container_width=True,
-                        type=btn_style
-                    ):
-                        st.session_state['fridge_selected'] = None if is_sel else iid
-                        st.session_state[f"editing_{iid}"] = False
-                        st.rerun()
-            st.markdown('<div style="height:1px;background:rgba(0,0,0,0.08);margin:6px 0;"></div>', unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # ── Inline edit panel — appears right below the fridge box ──
+        # ── Action panel — appears below animation when item selected ──
+        ALL_CATS = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen',
+                    'Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Unsorted']
         sel_id = st.session_state.get('fridge_selected')
         if sel_id:
             sel_rows = df[df['id'] == sel_id]
@@ -610,15 +596,10 @@ with tab1:
                 name = row['item_name'].replace('*','').strip().title()
                 cat = row.get('category') or 'Unsorted'
                 if cat.lower() in ('unknown','unsorted',''): cat = 'Unsorted'
-                days = row['days_left']
-
                 with st.container(border=True):
-                    st.markdown(f"**✏️ {name}** — {cat}")
+                    st.markdown(f"**✏️ {name}** `{cat}`")
                     a1, a2, a3, a4 = st.columns(4)
-                    ALL_CATS = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen',
-                                'Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Unsorted']
-                    new_cat = a1.selectbox("Move to",
-                        ALL_CATS,
+                    new_cat = a1.selectbox("Move to", ALL_CATS,
                         index=ALL_CATS.index(cat) if cat in ALL_CATS else 0,
                         key=f"mv_top_f_{sel_id}", label_visibility="collapsed")
                     if a2.button("📦 Move", key=f"domv_top_f_{sel_id}", use_container_width=True):
@@ -781,66 +762,56 @@ with tab_pantry:
     if 'pantry_selected' not in st.session_state:
         st.session_state['pantry_selected'] = None
 
-    if not pantry_df.empty:
-        # ── Interactive Pantry Visual ──
-        st.markdown("""
-        <div style="background:linear-gradient(180deg,#f5efe6,#ede4d8);
-                    border-radius:16px; border:2px solid #d4c4b0;
-                    padding:14px; margin-bottom:12px;
-                    box-shadow:inset 0 2px 8px rgba(0,0,0,0.06);">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;
-                      color:#8B7355;margin-bottom:10px;font-weight:600;">
-            🏺 Tap an item to select it
-          </div>
-        """, unsafe_allow_html=True)
+    ALL_CATS_P = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen',
+                  'Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Unsorted']
 
-        # Group by category, Unsorted first
-        ALL_CATS_P = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen',
-                      'Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Unsorted']
+    if not pantry_df.empty:
         pantry_df['category'] = pantry_df['category'].fillna('Unsorted')
         pantry_df.loc[pantry_df['category'].str.lower().isin(['unknown','']), 'category'] = 'Unsorted'
 
-        # Unsorted first, then alphabetical
-        cats_present = (['Unsorted'] if 'Unsorted' in pantry_df['category'].values else []) +                        sorted([c for c in pantry_df['category'].unique() if c != 'Unsorted'])
+        # ── Pantry shelf animation + tappable pills side by side ──
+        p_anim_col, p_pill_col = st.columns([2, 3])
 
-        shelf_colors = {
-            'Unsorted': ('#fff3e0','#e65100'),
-            'Dairy':    ('#e3f2fd','#1565c0'),
-            'Meat':     ('#fce4ec','#c62828'),
-            'Produce':  ('#e8f5e9','#2D5016'),
-            'Frozen':   ('#e8eaf6','#283593'),
-        }
-        default_color = ('#faf7f2', '#8B7355')
+        with p_anim_col:
+            pantry_items_anim = pantry_df[['item_name','days_left','category']].to_dict('records')
+            num_cats = pantry_df['category'].nunique()
+            pantry_height = max(160, 80 + num_cats * 110)
+            components.html(
+                get_pantry_animation(pantry_items_anim, lang=st.session_state['lang']),
+                height=pantry_height, scrolling=False
+            )
 
-        for cat in cats_present:
-            cat_items = pantry_df[pantry_df['category'] == cat]
-            bg, color = shelf_colors.get(cat, default_color)
-            cat_label = ("⚠️ Unsorted — tap to categorize" if cat == 'Unsorted'
-                         else f"📦 {cat}") if st.session_state['lang'] == 'en' else                         ("⚠️ Sin Categoría" if cat == 'Unsorted' else f"📦 {cat}")
-            st.markdown(f'<div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:{color};font-weight:700;margin:8px 0 4px;background:{bg};padding:3px 8px;border-radius:6px;">{cat_label}</div>', unsafe_allow_html=True)
+        with p_pill_col:
+            st.caption("👆 " + ("Tap an item to select" if st.session_state['lang']=='en' else "Toca un artículo para seleccionar"))
+            # Unsorted first so they're easy to find and categorize
+            cats_present = (['Unsorted'] if 'Unsorted' in pantry_df['category'].values else []) +                            sorted([c for c in pantry_df['category'].unique() if c != 'Unsorted'])
+            shelf_icons = {'Unsorted':'⚠️','Dairy':'🥛','Meat':'🥩','Produce':'🥦',
+                           'Bakery':'🍞','Frozen':'❄️','Beverages':'🥤','Snacks':'🍿',
+                           'Condiments':'🧴','Grains':'🌾','Cleaning':'🧹','Personal Care':'🧼'}
+            for cat in cats_present:
+                cat_items = pantry_df[pantry_df['category'] == cat]
+                icon = shelf_icons.get(cat, '📦')
+                st.markdown(f'<div style="font-size:9px;font-weight:700;color:#8B7355;text-transform:uppercase;letter-spacing:.06em;margin:6px 0 3px;">{icon} {cat}</div>', unsafe_allow_html=True)
+                items_list = cat_items.to_dict('records')
+                cols_per_row = 2
+                for row_start in range(0, len(items_list), cols_per_row):
+                    row_items = items_list[row_start:row_start+cols_per_row]
+                    pill_cols = st.columns(cols_per_row)
+                    for col_idx, item in enumerate(row_items):
+                        iid = item['id']
+                        iname = item['item_name'].replace('*','').strip().title()[:13]
+                        is_sel = st.session_state['pantry_selected'] == iid
+                        if pill_cols[col_idx].button(
+                            f"{icon} {'★ ' if is_sel else ''}{iname}",
+                            key=f"pill_p_{iid}",
+                            use_container_width=True,
+                            type="primary" if is_sel else "secondary"
+                        ):
+                            st.session_state['pantry_selected'] = None if is_sel else iid
+                            st.session_state[f"editing_pantry_{iid}"] = False
+                            st.rerun()
 
-            cols_per_row = 3
-            items_list = cat_items.to_dict('records')
-            for row_start in range(0, len(items_list), cols_per_row):
-                row_items = items_list[row_start:row_start+cols_per_row]
-                pill_cols = st.columns(cols_per_row)
-                for col_idx, item in enumerate(row_items):
-                    iid = item['id']
-                    iname = item['item_name'].replace('*','').strip().title()[:14]
-                    is_sel = st.session_state['pantry_selected'] == iid
-                    if pill_cols[col_idx].button(
-                        f"{'★ ' if is_sel else ''}{iname}",
-                        key=f"pill_p_{iid}",
-                        use_container_width=True,
-                        type="primary" if is_sel else "secondary"
-                    ):
-                        st.session_state['pantry_selected'] = None if is_sel else iid
-                        st.session_state[f"editing_pantry_{iid}"] = False
-                        st.rerun()
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # ── Inline action panel ──
+        # ── Action panel below both columns ──
         sel_id = st.session_state.get('pantry_selected')
         if sel_id:
             sel_rows = pantry_df[pantry_df['id'] == sel_id]
@@ -849,7 +820,7 @@ with tab_pantry:
                 pname = prow['item_name'].replace('*','').strip().title()
                 pcat = prow.get('category') or 'Unsorted'
                 with st.container(border=True):
-                    st.markdown(f"**✏️ {pname}** — {pcat}")
+                    st.markdown(f"**✏️ {pname}** `{pcat}`")
                     a1, a2, a3, a4 = st.columns(4)
                     new_pcat = a1.selectbox("Move to", ALL_CATS_P,
                         index=ALL_CATS_P.index(pcat) if pcat in ALL_CATS_P else len(ALL_CATS_P)-1,
