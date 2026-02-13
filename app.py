@@ -341,41 +341,70 @@ receipt_scanner_obj = ReceiptScanner()
 with st.sidebar.expander(t('quick_add'), expanded=True):
     qa_tab1, qa_tab2, qa_tab3 = st.tabs([t('tab_type'), t('tab_barcode'), t('tab_receipt')])
     with qa_tab1:
-        with st.form("add_form"):
+        if 'add_form_key' not in st.session_state:
+            st.session_state['add_form_key'] = 0
+        with st.form(f"add_form_{st.session_state['add_form_key']}"):
             new_item = st.text_input(t('item_name'))
             qty = st.number_input(t('quantity'), 1, 100, 1)
             price_input = st.number_input(t('price'), 0.0, 1000.0, 0.0, step=0.01)
             store_input = st.text_input(t('store'))
             pantry_label = "🏺 Pantry" if st.session_state['lang'] == 'en' else "🏺 Despensa"
             dest = st.radio(t('add_to'), [t('fridge'), pantry_label, t('shopping_list')])
+            all_cats_en = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen','Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Other']
+            all_cats_es = ['Lácteos','Carne','Verduras/Frutas','Panadería','Despensa','Congelados','Bebidas','Botanas','Condimentos','Granos','Limpieza','Cuidado Personal','Otro']
+            all_cats = all_cats_es if st.session_state['lang'] == 'es' else all_cats_en
+            auto_label = "🔍 Auto-detect" if st.session_state['lang'] == 'en' else "🔍 Auto-detectar"
+            manual_cat = st.selectbox(
+                "Category" if st.session_state['lang'] == 'en' else "Categoría",
+                [auto_label] + all_cats
+            )
             if st.form_submit_button(t('add_item')):
                 if new_item:
                     if dest == t('fridge'):
                         db_add_item(new_item, qty, price_input, store_input)
                         if price_input > 0: db_record_purchase(new_item, price_input, store_input)
-                        st.toast(f"{t('added_to_fridge')} {new_item}!")
+                        if manual_cat not in ("Auto-detect", "🔍 Auto-detect", "🔍 Auto-detectar"):
+                            try:
+                                r = supabase.table("inventory").select("id").eq("user_id", user_id).eq("item_name", new_item.lower()).order("id", desc=True).limit(1).execute()
+                                if r.data:
+                                    supabase.table("inventory").update({"category": manual_cat}).eq("id", r.data[0]['id']).execute()
+                            except: pass
+                        msg = f"{t('added_to_fridge')} {new_item}!"
+
                     elif dest == pantry_label:
-                        # Force storage to pantry
                         try:
                             from inventory_logic import InventoryLogic
-                            from datetime import timedelta, datetime
                             logic = InventoryLogic()
                             a = logic.normalize_item(new_item)
-                            expiry = (datetime.now().date() + timedelta(days=180)).isoformat()  # pantry = 6mo default
+                            expiry = (__import__('datetime').date.today() + __import__('datetime').timedelta(days=180)).isoformat()
+                            # Robust category fallback — if auto-detect fails, use Pantry
+                            auto_cat = a.get('category', '')
+                            if manual_cat not in ("Auto-detect", "🔍 Auto-detect", "🔍 Auto-detectar"):
+                                final_cat = manual_cat
+                            elif auto_cat and auto_cat.lower() not in ('unknown', '', 'other'):
+                                final_cat = auto_cat
+                            else:
+                                final_cat = 'Pantry'
                             supabase.table("inventory").insert({
-                                "user_id": user_id, "item_name": a['clean_name'], "category": a['category'],
+                                "user_id": user_id, "item_name": a['clean_name'], "category": final_cat,
                                 "quantity": qty, "unit": a['unit'], "storage": "pantry",
                                 "date_added": date.today().isoformat(), "expiry_date": expiry,
                                 "status": "In Stock", "decision_reason": "Added to pantry",
                                 "price": price_input or 0, "store": store_input or "", "barcode": ""
                             }).execute()
                             if price_input > 0: db_record_purchase(new_item, price_input, store_input)
-                            st.toast(f"🏺 Added to pantry!")
+                            msg = f"🏺 Added {new_item} to pantry!"
                         except Exception as e:
                             st.error(f"Error: {e}")
+                            msg = None
+
                     else:
                         db_add_to_shopping_list(new_item, price_input)
-                        st.toast(t('added_to_list'))
+                        msg = f"🛒 {t('added_to_list')}"
+
+                    # Reset form by incrementing key, then rerun
+                    st.session_state['add_form_key'] += 1
+                    if msg: st.toast(msg)
                     st.rerun()
     with qa_tab2:
         barcode_input = st.text_input(t('enter_barcode'))
@@ -554,13 +583,21 @@ with tab1:
                             value=float(row['quantity']) if row.get('quantity') else 1.0,
                             step=1.0, min_value=0.0
                         )
-                        ec4, ec5 = st.columns(2)
+                        ec4, ec5, ec6 = st.columns(3)
                         new_store = ec4.text_input(
                             "Store" if st.session_state['lang'] == 'en' else "Tienda",
                             value=row.get('store', '') or ''
                         )
-                        new_expiry = ec5.date_input(
-                            "Expiry Date" if st.session_state['lang'] == 'en' else "Fecha de Vencimiento",
+                        all_cats = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen','Beverages','Snacks','Condiments','Grains','Other']
+                        current_cat = row.get('category', 'Other') or 'Other'
+                        if current_cat not in all_cats: current_cat = 'Other'
+                        new_cat = ec5.selectbox(
+                            "Category" if st.session_state['lang'] == 'en' else "Categoría",
+                            all_cats,
+                            index=all_cats.index(current_cat)
+                        )
+                        new_expiry = ec6.date_input(
+                            "Expiry" if st.session_state['lang'] == 'en' else "Vencimiento",
                             value=row['expiry_date']
                         )
                         save_col, cancel_col = st.columns(2)
@@ -579,6 +616,7 @@ with tab1:
                                     "price": new_price,
                                     "quantity": new_qty,
                                     "store": new_store,
+                                    "category": new_cat,
                                     "expiry_date": new_expiry.isoformat()
                                 }).eq("id", row['id']).eq("user_id", user_id).execute()
                                 st.session_state[edit_key] = False
@@ -646,12 +684,23 @@ with tab_pantry:
                         new_name  = ep1.text_input("Name" if st.session_state['lang'] == 'en' else "Nombre", value=row['item_name'].title())
                         new_price = ep2.number_input("Price ($)", value=float(row['price']) if row.get('price') else 0.0, step=0.01)
                         new_qty   = ep3.number_input("Qty", value=float(row['quantity']) if row.get('quantity') else 1.0, step=1.0)
-                        new_expiry = st.date_input("Expiry" if st.session_state['lang'] == 'en' else "Vencimiento", value=row['expiry_date'])
+                        ep4, ep5 = st.columns(2)
+                        p_cats = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen','Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Other']
+                        p_cur_cat = row.get('category', 'Pantry') or 'Pantry'
+                        # Normalize bad values like 'unknown', 'Unknown', ''
+                        if not p_cur_cat or p_cur_cat.lower() in ('unknown', 'other') or p_cur_cat not in p_cats:
+                            p_cur_cat = 'Pantry'
+                        new_p_cat = ep4.selectbox(
+                            "Category" if st.session_state['lang'] == 'en' else "Categoría",
+                            p_cats, index=p_cats.index(p_cur_cat)
+                        )
+                        new_expiry = ep5.date_input("Expiry" if st.session_state['lang'] == 'en' else "Vencimiento", value=row['expiry_date'])
                         sv, cv = st.columns(2)
                         if sv.form_submit_button("💾 Save" if st.session_state['lang'] == 'en' else "💾 Guardar"):
                             supabase.table("inventory").update({
                                 "item_name": new_name.lower(), "price": new_price,
-                                "quantity": new_qty, "expiry_date": new_expiry.isoformat()
+                                "quantity": new_qty, "category": new_p_cat,
+                                "expiry_date": new_expiry.isoformat()
                             }).eq("id", row['id']).eq("user_id", user_id).execute()
                             st.session_state[edit_key] = False
                             st.toast("✅ Saved!")
