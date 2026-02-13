@@ -19,6 +19,13 @@ class ReceiptScanner:
             return {"error": "API Key missing. Add GOOGLE_API_KEY to Streamlit Secrets."}
 
         try:
+            # File size check — reject files over 5MB
+            image_file.seek(0, 2)
+            size = image_file.tell()
+            image_file.seek(0)
+            if size > 5_000_000:
+                return {"error": "Image too large. Please use a photo under 5MB."}
+
             # Convert image to base64
             img = PIL.Image.open(image_file)
             img.thumbnail((1024, 1024))
@@ -72,7 +79,7 @@ Return ONLY the JSON array. No markdown, no explanation, no extra text."""
                 }
             }
 
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, timeout=15)
 
             if response.status_code != 200:
                 return {"error": f"API Error {response.status_code}: {response.text[:200]}"}
@@ -99,7 +106,15 @@ Return ONLY the JSON array. No markdown, no explanation, no extra text."""
                         name = name[len(prefix):]
                 item['item'] = name.title().strip()
             
-            return items
+            # Validate each item has expected fields before trusting AI output
+            safe_items = []
+            for item in items:
+                if (isinstance(item.get("item"), str) and
+                    isinstance(item.get("price"), (int, float)) and
+                    item.get("price", 0) >= 0 and
+                    item.get("price", 0) < 1000):  # sanity check — no $1000 grocery items
+                    safe_items.append(item)
+            return safe_items if safe_items else {"error": "No valid items found on receipt."}
 
         except json.JSONDecodeError:
             return {"error": "Could not read receipt. Try a clearer, well-lit photo."}
