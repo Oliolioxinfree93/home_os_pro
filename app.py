@@ -166,6 +166,13 @@ def db_get_pantry():
         return pd.DataFrame(r.data) if r.data else pd.DataFrame()
     except: return pd.DataFrame()
 
+def clean_item_name(name):
+    """Strip markdown, asterisks, extra spaces from item names before saving."""
+    import re
+    name = name.replace('*', '').replace('_', '').replace('`', '')
+    name = re.sub(r'\s+', ' ', name).strip().lower()
+    return name
+
 def db_add_item(raw_name, quantity=1, price=0.0, store=None, barcode=None):
     try:
         logic = InventoryLogic()
@@ -386,7 +393,7 @@ with st.sidebar.expander(t('quick_add'), expanded=True):
                             else:
                                 final_cat = 'Pantry'
                             supabase.table("inventory").insert({
-                                "user_id": user_id, "item_name": a['clean_name'], "category": final_cat,
+                                "user_id": user_id, "item_name": clean_item_name(a['clean_name']), "category": final_cat,
                                 "quantity": qty, "unit": a['unit'], "storage": "pantry",
                                 "date_added": date.today().isoformat(), "expiry_date": expiry,
                                 "status": "In Stock", "decision_reason": "Added to pantry",
@@ -440,7 +447,7 @@ with st.sidebar.expander(t('quick_add'), expanded=True):
                     store_name = st.text_input(t('store_name'), "Walmart")
                     if st.form_submit_button(t('save_selected')):
                         for item in selected:
-                            db_add_item(item['item'], quantity=item.get('qty',1), price=item['price'], store=store_name)
+                            db_add_item(clean_item_name(item['item']), quantity=item.get('qty',1), price=item['price'], store=store_name)
                             db_record_purchase(item['item'], item['price'], store=store_name)
                         st.toast(f"{t('save_selected')}!")
                         del st.session_state['scan_results']
@@ -537,7 +544,8 @@ with tab1:
             items_for_anim = df[['item_name','days_left','storage','category']].to_dict('records')
             components.html(
                 get_fridge_animation(items_for_anim, lang=st.session_state['lang']),
-                height=360
+                height=300,
+                scrolling=False
             )
         with list_col:
             c1, c2, c3, c4 = st.columns(4)
@@ -549,7 +557,7 @@ with tab1:
         for _, row in df.iterrows():
             with st.container(border=True):
                 c1, c2, c3, c4, c5, c6 = st.columns([3, 2, 1.5, 1.5, 1, 1])
-                c1.markdown(f"**{row['item_name'].title()}**")
+                c1.markdown(f"**{row['item_name'].replace('*','').strip().title()}**")
                 if row.get('decision_reason'): c1.caption(f"ℹ️ {row['decision_reason']}")
                 days = row['days_left']
                 c2.write(t('expired_ago', abs(days)) if days < 0 else t('expires_in', days) if days < 4 else t('good', days))
@@ -647,7 +655,8 @@ with tab_pantry:
 
     components.html(
         get_pantry_animation(pantry_items_anim, lang=st.session_state['lang']),
-        height=max(200, min(80 + len(pantry_items_anim) * 12, 420))
+        height=min(180 + len(pantry_items_anim) * 8, 300),
+        scrolling=False
     )
 
     st.markdown("---")
@@ -664,8 +673,13 @@ with tab_pantry:
         for _, row in pantry_df.sort_values('days_left').iterrows():
             with st.container(border=True):
                 pc1, pc2, pc3, pc4, pc5, pc6 = st.columns([3, 2, 1.5, 1.5, 1, 1])
-                pc1.markdown(f"**{row['item_name'].title()}**")
-                if row.get('category'): pc1.caption(f"📂 {row['category']}")
+                clean_name = row['item_name'].replace('*','').strip().title()
+                pc1.markdown(f"**{clean_name}**")
+                cat_display = row.get('category','')
+                if cat_display and cat_display.lower() not in ('unknown',''):
+                    pc1.caption(f"📂 {cat_display}")
+                elif cat_display.lower() in ('unknown',''):
+                    pc1.caption("📂 Pantry")
                 days = row['days_left']
                 pc2.write(t('expired_ago', abs(days)) if days < 0 else t('expires_in', days) if days < 14 else t('good', days))
                 pc3.caption(f"{row['quantity']} {row['unit']}")
@@ -714,6 +728,23 @@ with tab_pantry:
             if st.session_state['lang'] == 'en' else
             "🏺 Tu despensa está vacía. Agrega productos desde el menú y selecciona 'Despensa' como destino."
         )
+
+    # One-time fix for items with ** in their names
+    with st.expander("🔧 Fix item names" if st.session_state['lang'] == 'en' else "🔧 Corregir nombres"):
+        st.caption("Run this once to clean up any items with ** or formatting characters in their names." if st.session_state['lang'] == 'en' else "Ejecuta esto una vez para limpiar nombres con ** u otros caracteres.")
+        if st.button("🧹 Clean item names", use_container_width=True):
+            try:
+                all_items = supabase.table("inventory").select("id, item_name").eq("user_id", user_id).execute()
+                fixed = 0
+                for item in all_items.data:
+                    if '*' in item['item_name'] or '_' in item['item_name']:
+                        clean = item['item_name'].replace('*','').replace('_','').strip().lower()
+                        supabase.table("inventory").update({"item_name": clean}).eq("id", item['id']).execute()
+                        fixed += 1
+                st.success(f"✅ Fixed {fixed} item names!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
 
 with tab2:
     st.header(t('shopping_list_title'))
