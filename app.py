@@ -714,7 +714,9 @@ with tab3:
     st.header(t('meal_planner_title'))
     start_date = st.date_input(t('week_starting'), value=date.today() - timedelta(days=date.today().weekday()))
     week_plan = db_get_meal_plan(start_date)
-    meal_types = [t('breakfast'), t('lunch'), t('dinner'), t('snack')]
+    meal_types_en = ['breakfast', 'lunch', 'dinner', 'snack']
+    meal_types_es = ['desayuno', 'almuerzo', 'cena', 'merienda']
+    meal_types = meal_types_es if st.session_state['lang'] == 'es' else meal_types_en
     day_names_en = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
     day_names_es = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']
     day_names = day_names_es if st.session_state['lang'] == 'es' else day_names_en
@@ -731,7 +733,14 @@ with tab3:
             for meal in week_plan[current_date.isoformat()]:
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([1, 4, 1])
-                    c1.write(f"**{meal['meal_type'].title()}**")
+                    meal_type_raw = meal['meal_type'].lower()
+                    meal_translations = {'breakfast':'desayuno','lunch':'almuerzo','dinner':'cena','snack':'merienda',
+                                         'desayuno':'breakfast','almuerzo':'lunch','cena':'dinner','merienda':'snack'}
+                    if st.session_state['lang'] == 'es':
+                        meal_type_display = meal_translations.get(meal_type_raw, meal_type_raw).title()
+                    else:
+                        meal_type_display = meal_translations.get(meal_type_raw, meal_type_raw).title() if meal_type_raw in meal_translations and meal_type_raw in meal_types_es else meal_type_raw.title()
+                    c1.write(f"**{meal_type_display}**")
                     c2.write(meal['recipe_name'])
                     if c3.button("🗑️", key=f"del_meal_{meal['id']}"):
                         supabase.table("meal_plan").delete().eq("id", meal['id']).eq("user_id", user_id).execute()
