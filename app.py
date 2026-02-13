@@ -6,14 +6,18 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from translations import get_text
+from styles import get_css
+from report_generator import generate_monthly_report
 import os
 import json
+import streamlit.components.v1 as components
 
 # Only disable HTTPS requirement in local dev, never in production
 if os.getenv('ENV') == 'dev':
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 st.set_page_config(page_title="Home OS Pro", page_icon="🏠", layout="wide")
+st.markdown(get_css(), unsafe_allow_html=True)
 
 # --- LANGUAGE SELECTOR ---
 if 'lang' not in st.session_state:
@@ -420,6 +424,26 @@ with tab0:
         st.write(f"{t('admin_work')} **${admin_value:.2f}**")
     st.markdown("---")
     st.success(t('bottom_line', f"{total_value:.2f}", f"{total_value*12:,.2f}"))
+
+    # Shareable monthly report
+    st.markdown("---")
+    report_col1, report_col2 = st.columns([3, 1])
+    report_col1.markdown("#### 📄 " + ("Monthly Report" if st.session_state['lang'] == 'en' else "Reporte Mensual"))
+    report_col1.caption("Share your contribution with your partner or save it for your records." if st.session_state['lang'] == 'en' else "Comparte tu contribución con tu pareja o guárdala para tus registros.")
+    if report_col2.button("📤 " + ("Generate" if st.session_state['lang'] == 'en' else "Generar"), use_container_width=True, type="primary"):
+        st.session_state['show_report'] = True
+
+    if st.session_state.get('show_report'):
+        report_html = generate_monthly_report(user_name, savings, lang=st.session_state['lang'])
+        st.components.v1.html(report_html, height=820, scrolling=True)
+        st.download_button(
+            label="⬇️ Download Report" if st.session_state['lang'] == 'en' else "⬇️ Descargar Reporte",
+            data=report_html,
+            file_name=f"HomeOS_Report_{__import__('datetime').date.today().strftime('%Y_%m')}.html",
+            mime="text/html",
+            use_container_width=True
+        )
+        st.caption("💡 To save as PDF: open the downloaded file in your browser → Print → Save as PDF" if st.session_state['lang'] == 'en' else "💡 Para guardar como PDF: abre el archivo en tu navegador → Imprimir → Guardar como PDF")
     achievements = []
     if savings['food_waste_prevention'] >= 25:
         achievements.append(("♻️", t('waste_warrior'), t('waste_warrior_desc', f"{savings['food_waste_prevention']:.2f}")))
@@ -744,12 +768,82 @@ with tab5:
                 df_ph = pd.DataFrame(ph.data)
                 df_ph['category'] = df_ph['item_name'].apply(lambda x: logic.normalize_item(x)['category'])
                 import plotly.express as px
-                fig = px.pie(df_ph.groupby('category')['price'].sum().reset_index(), values='price', names='category')
+                fig = px.pie(df_ph.groupby('category')['price'].sum().reset_index(), values='price', names='category',
+                             color_discrete_sequence=['#2D5016','#7A9E5F','#C8952A','#C4572A','#4a7c29','#a0c878'])
+                fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_family='DM Sans')
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info(t('add_purchases'))
         except:
             st.info(t('add_purchases'))
 
-st.markdown("---")
-st.caption(t('built_with_love'))
+    # Price comparison — full width below
+    st.markdown("---")
+    st.subheader("🏪 " + ("Price Comparison by Store" if st.session_state['lang'] == 'en' else "Comparación de Precios por Tienda"))
+    st.caption("Which store gives you the best price on each item?" if st.session_state['lang'] == 'en' else "¿Qué tienda te da el mejor precio por producto?")
+
+    try:
+        ph_full = supabase.table("price_history").select("item_name, price, store, date_recorded").eq("user_id", user_id).execute()
+        if ph_full.data and len(ph_full.data) >= 2:
+            df_price = pd.DataFrame(ph_full.data)
+            df_price = df_price[df_price['store'].notna() & (df_price['store'] != '')]
+
+            if not df_price.empty:
+                # Group by item + store, get average price
+                comparison = df_price.groupby(['item_name', 'store'])['price'].agg(['mean', 'count']).reset_index()
+                comparison.columns = ['Item', 'Store', 'Avg Price', 'Times Bought']
+                comparison['Avg Price'] = comparison['Avg Price'].round(2)
+
+                # Find cheapest store per item
+                cheapest = comparison.loc[comparison.groupby('Item')['Avg Price'].idxmin()][['Item', 'Store', 'Avg Price']]
+                cheapest = cheapest.rename(columns={'Store': 'Cheapest Store', 'Avg Price': 'Best Price'})
+
+                # Only show items bought at 2+ stores (meaningful comparison)
+                items_multi_store = comparison.groupby('Item')['Store'].nunique()
+                items_to_compare = items_multi_store[items_multi_store >= 2].index
+
+                if len(items_to_compare) > 0:
+                    st.markdown("#### 🏆 " + ("Best Deals Found" if st.session_state['lang'] == 'en' else "Mejores Precios Encontrados"))
+                    for item in items_to_compare:
+                        item_data = comparison[comparison['Item'] == item].sort_values('Avg Price')
+                        best_price = item_data.iloc[0]['Avg Price']
+                        worst_price = item_data.iloc[-1]['Avg Price']
+                        savings_pct = ((worst_price - best_price) / worst_price * 100)
+
+                        with st.container(border=True):
+                            h1, h2 = st.columns([3, 1])
+                            h1.markdown(f"**{item.title()}**")
+                            h2.markdown(f"💰 Save **{savings_pct:.0f}%**")
+                            for _, store_row in item_data.iterrows():
+                                is_best = store_row['Avg Price'] == best_price
+                                prefix = "🥇 " if is_best else "　"
+                                color = "#2D5016" if is_best else "#6B6B6B"
+                                st.markdown(
+                                    f"<span style='color:{color}'>{prefix}**{store_row['Store']}** — ${store_row['Avg Price']:.2f}</span>",
+                                    unsafe_allow_html=True
+                                )
+
+                    # Total savings potential
+                    total_potential = sum(
+                        comparison[comparison['Item'] == item]['Avg Price'].max() -
+                        comparison[comparison['Item'] == item]['Avg Price'].min()
+                        for item in items_to_compare
+                    )
+                    st.success(f"🎯 {'Shopping smart on these items could save you' if st.session_state['lang'] == 'en' else 'Comprar inteligente en estos productos podría ahorrarte'} **${total_potential:.2f}** {'per trip' if st.session_state['lang'] == 'en' else 'por viaje'}")
+
+                else:
+                    st.info("📊 " + ("Buy the same item at different stores to see price comparisons here." if st.session_state['lang'] == 'en' else "Compra el mismo producto en diferentes tiendas para ver comparaciones aquí."))
+
+                # Full price history table in expander
+                with st.expander("📋 " + ("Full Price History" if st.session_state['lang'] == 'en' else "Historial Completo de Precios")):
+                    display_df = comparison.sort_values(['Item', 'Avg Price'])
+                    display_df.columns = ['Item', 'Store', 'Avg Price ($)', 'Times Bought']
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("🏪 " + ("Add the store name when saving receipts to enable price comparison." if st.session_state['lang'] == 'en' else "Agrega el nombre de la tienda al guardar recibos para activar la comparación de precios."))
+        else:
+            st.info("📊 " + ("Scan receipts from different stores to see which has the best prices." if st.session_state['lang'] == 'en' else "Escanea recibos de diferentes tiendas para ver cuál tiene los mejores precios."))
+    except Exception as e:
+        st.info("📊 " + ("Scan a few receipts to unlock price comparison." if st.session_state['lang'] == 'en' else "Escanea algunos recibos para activar la comparación de precios."))
+
+st.markdown('<div class="footer-text">' + t('built_with_love') + '</div>', unsafe_allow_html=True)
