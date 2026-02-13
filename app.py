@@ -388,7 +388,7 @@ with st.sidebar.expander(t('quick_add'), expanded=True):
                             auto_cat = a.get('category', '')
                             if manual_cat not in ("Auto-detect", "🔍 Auto-detect", "🔍 Auto-detectar"):
                                 final_cat = manual_cat
-                            elif auto_cat and auto_cat.lower() not in ('unknown', '', 'other'):
+                            elif auto_cat and auto_cat.lower() not in ('unsorted', '', 'other'):
                                 final_cat = auto_cat
                             else:
                                 final_cat = 'Pantry'
@@ -554,23 +554,64 @@ with tab1:
             c3.metric(t('total_value'), f"${df['price'].sum():.2f}")
             c4.metric(t('frozen'), len(df[df['storage'] == 'frozen']))
 
-        for _, row in df.iterrows():
-            with st.container(border=True):
-                c1, c2, c3, c4, c5, c6 = st.columns([3, 2, 1.5, 1.5, 1, 1])
-                c1.markdown(f"**{row['item_name'].replace('*','').strip().title()}**")
-                if row.get('decision_reason'): c1.caption(f"ℹ️ {row['decision_reason']}")
-                days = row['days_left']
-                c2.write(t('expired_ago', abs(days)) if days < 0 else t('expires_in', days) if days < 4 else t('good', days))
-                c3.caption(f"{row['quantity']} {row['unit']} ({row['storage']})")
-                if row.get('price'): c4.write(f"${row['price']:.2f}")
+        # Track selected item for tap-to-select
+        if 'fridge_selected' not in st.session_state:
+            st.session_state['fridge_selected'] = None
 
-                # Edit button
-                edit_key = f"editing_{row['id']}"
-                if c5.button("✏️", key=f"edit_btn_{row['id']}"):
-                    st.session_state[edit_key] = not st.session_state.get(edit_key, False)
-                if c6.button("🗑️", key=f"del_{row['id']}"):
-                    db_delete_item(row['id'])
+        ALL_CATS = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen',
+                    'Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Unsorted']
+
+        for _, row in df.iterrows():
+            item_id = row['id']
+            is_selected = st.session_state['fridge_selected'] == item_id
+            name = row['item_name'].replace('*','').strip().title()
+            days = row['days_left']
+            cat = row.get('category') or 'Unsorted'
+            if cat.lower() in ('unknown','unsorted',''): cat = 'Unsorted'
+
+            # Card styling — gold highlight when selected
+            border_style = "border: 2px solid #C8952A; background: #FDF6E9;" if is_selected else ""
+            with st.container(border=True):
+                if border_style:
+                    st.markdown(f'<div style="{border_style} border-radius:12px; padding:2px; margin:-8px -10px 6px -10px;"></div>', unsafe_allow_html=True)
+
+                # Tap row — full width button to select/deselect
+                tap_col, info_col = st.columns([1, 6])
+                sel_icon = "🟡" if is_selected else "⬜"
+                if tap_col.button(sel_icon, key=f"sel_f_{item_id}", help="Tap to select"):
+                    st.session_state['fridge_selected'] = None if is_selected else item_id
                     st.rerun()
+
+                with info_col:
+                    st.markdown(f"**{name}**  `{cat}`")
+                    exp_txt = (t('expired_ago', abs(days)) if days < 0
+                               else t('expires_in', days) if days < 4
+                               else t('good', days))
+                    price_txt = f" · ${row['price']:.2f}" if row.get('price') else ""
+                    st.caption(f"{exp_txt} · {row['quantity']} {row['unit']}{price_txt}")
+
+                # ── SELECTED: show action bar ──
+                if is_selected:
+                    st.markdown('<div style="background:#FDF6E9; border-top:1px solid #E8C97A; padding:8px 0 2px; margin-top:4px;">', unsafe_allow_html=True)
+                    a1, a2, a3, a4 = st.columns(4)
+
+                    # Quick move to category
+                    new_cat = a1.selectbox("📦 Move to",
+                        ALL_CATS,
+                        index=ALL_CATS.index(cat) if cat in ALL_CATS else len(ALL_CATS)-1,
+                        key=f"mv_f_{item_id}", label_visibility="collapsed")
+                    if a2.button("✅ Move", key=f"domv_f_{item_id}"):
+                        supabase.table("inventory").update({"category": new_cat}).eq("id", item_id).eq("user_id", user_id).execute()
+                        st.session_state['fridge_selected'] = None
+                        st.toast(f"Moved to {new_cat}!")
+                        st.rerun()
+                    if a3.button("✏️ Edit", key=f"edit_btn_{item_id}"):
+                        st.session_state[f"editing_{item_id}"] = not st.session_state.get(f"editing_{item_id}", False)
+                    if a4.button("🗑️ Del", key=f"del_{item_id}"):
+                        db_delete_item(item_id)
+                        st.session_state['fridge_selected'] = None
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
 
                 # Edit form — shows inline when pencil clicked
                 if st.session_state.get(edit_key, False):
@@ -673,27 +714,67 @@ with tab_pantry:
                   f"${pantry_df['price'].sum():.2f}")
 
         st.markdown("### " + ("All Pantry Items" if st.session_state['lang'] == 'en' else "Todos los Productos"))
-        for _, row in pantry_df.sort_values('days_left').iterrows():
-            with st.container(border=True):
-                pc1, pc2, pc3, pc4, pc5, pc6 = st.columns([3, 2, 1.5, 1.5, 1, 1])
-                clean_name = row['item_name'].replace('*','').strip().title()
-                pc1.markdown(f"**{clean_name}**")
-                cat_display = row.get('category','')
-                if cat_display and cat_display.lower() not in ('unknown',''):
-                    pc1.caption(f"📂 {cat_display}")
-                elif cat_display.lower() in ('unknown',''):
-                    pc1.caption("📂 Pantry")
-                days = row['days_left']
-                pc2.write(t('expired_ago', abs(days)) if days < 0 else t('expires_in', days) if days < 14 else t('good', days))
-                pc3.caption(f"{row['quantity']} {row['unit']}")
-                if row.get('price'): pc4.write(f"${row['price']:.2f}")
+        if 'pantry_selected' not in st.session_state:
+            st.session_state['pantry_selected'] = None
 
-                edit_key = f"editing_pantry_{row['id']}"
-                if pc5.button("✏️", key=f"edit_p_{row['id']}"):
-                    st.session_state[edit_key] = not st.session_state.get(edit_key, False)
-                if pc6.button("🗑️", key=f"del_p_{row['id']}"):
-                    db_delete_item(row['id'])
+        ALL_CATS_P = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen',
+                      'Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Unsorted']
+
+        # Show Unsorted shelf first if any exist
+        unsorted_items = pantry_df[pantry_df['category'].str.lower().isin(['unsorted','unknown',''])]
+        if not unsorted_items.empty:
+            st.markdown("### 📦 " + ("Unsorted — tap to categorize" if st.session_state['lang'] == 'en' else "Sin Categoría — toca para organizar"))
+
+        for _, row in pantry_df.sort_values(['category','days_left']).iterrows():
+            item_id = row['id']
+            is_selected = st.session_state['pantry_selected'] == item_id
+            name = row['item_name'].replace('*','').strip().title()
+            days = row['days_left']
+            cat = row.get('category') or 'Unsorted'
+            if cat.lower() in ('unknown','unsorted',''): cat = 'Unsorted'
+
+            with st.container(border=True):
+                # Gold highlight strip when selected
+                if is_selected:
+                    st.markdown('<div style="height:3px; background: linear-gradient(90deg,#C8952A,#F5E6C8); border-radius:4px; margin:-8px -10px 8px -10px;"></div>', unsafe_allow_html=True)
+
+                tap_col, info_col = st.columns([1, 7])
+                sel_icon = "🟡" if is_selected else "⬜"
+                if tap_col.button(sel_icon, key=f"sel_p_{item_id}"):
+                    st.session_state['pantry_selected'] = None if is_selected else item_id
                     st.rerun()
+
+                with info_col:
+                    cat_badge = f" `{cat}`" if cat != 'Unsorted' else " ⚠️ `Unsorted`"
+                    st.markdown(f"**{name}**{cat_badge}")
+                    exp_txt = (t('expired_ago', abs(days)) if days < 0
+                               else t('expires_in', days) if days < 14
+                               else t('good', days))
+                    price_txt = f" · ${row['price']:.2f}" if row.get('price') else ""
+                    st.caption(f"{exp_txt} · {row['quantity']} {row['unit']}{price_txt}")
+
+                # ── SELECTED: action bar ──
+                if is_selected:
+                    st.markdown('<div style="border-top:1px solid #E8C97A; padding-top:8px; margin-top:4px;">', unsafe_allow_html=True)
+                    a1, a2, a3, a4 = st.columns(4)
+                    new_cat = a1.selectbox(
+                        "📦 Category",
+                        ALL_CATS_P,
+                        index=ALL_CATS_P.index(cat) if cat in ALL_CATS_P else 0,
+                        key=f"mv_p_{item_id}", label_visibility="collapsed"
+                    )
+                    if a2.button("✅ Move", key=f"domv_p_{item_id}"):
+                        supabase.table("inventory").update({"category": new_cat}).eq("id", item_id).eq("user_id", user_id).execute()
+                        st.session_state['pantry_selected'] = None
+                        st.toast(f"📦 Moved to {new_cat}!")
+                        st.rerun()
+                    if a3.button("✏️ Edit", key=f"edit_p_{item_id}"):
+                        st.session_state[f"editing_pantry_{item_id}"] = not st.session_state.get(f"editing_pantry_{item_id}", False)
+                    if a4.button("🗑️ Del", key=f"del_p_{item_id}"):
+                        db_delete_item(item_id)
+                        st.session_state['pantry_selected'] = None
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
 
                 if st.session_state.get(edit_key, False):
                     with st.form(key=f"edit_pantry_{row['id']}"):
@@ -704,8 +785,8 @@ with tab_pantry:
                         ep4, ep5 = st.columns(2)
                         p_cats = ['Dairy','Meat','Produce','Bakery','Pantry','Frozen','Beverages','Snacks','Condiments','Grains','Cleaning','Personal Care','Other']
                         p_cur_cat = row.get('category', 'Pantry') or 'Pantry'
-                        # Normalize bad values like 'unknown', 'Unknown', ''
-                        if not p_cur_cat or p_cur_cat.lower() in ('unknown', 'other') or p_cur_cat not in p_cats:
+                        # Normalize bad values like 'unsorted', 'Unsorted', ''
+                        if not p_cur_cat or p_cur_cat.lower() in ('unsorted', 'other') or p_cur_cat not in p_cats:
                             p_cur_cat = 'Pantry'
                         new_p_cat = ep4.selectbox(
                             "Category" if st.session_state['lang'] == 'en' else "Categoría",
