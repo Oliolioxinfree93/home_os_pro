@@ -9,6 +9,7 @@ from translations import get_text
 from styles import get_css
 from report_generator import generate_monthly_report
 from fridge_animation import get_fridge_animation, get_pantry_animation
+from nutrition_engine import suggest_portions_for_goals
 import os
 import json
 import streamlit.components.v1 as components
@@ -454,10 +455,87 @@ with st.sidebar.expander(t('quick_add'), expanded=True):
                         st.rerun()
 
 # --- MAIN TABS ---
-tab0, tab1, tab_pantry, tab2, tab3, tab4, tab5 = st.tabs([
+# ── TODAY'S BRIEFING ──
+try:
+    _today = date.today()
+    _inv = supabase.table("inventory").select("item_name,expiry_date,status").eq("user_id", user_id).eq("status","In Stock").execute()
+    _sl  = supabase.table("shopping_list").select("id").eq("user_id", user_id).eq("bought", False).execute()
+    _meal_q = supabase.table("meal_plan").select("meal_name").eq("user_id", user_id).eq("meal_date", date.today().isoformat()).eq("meal_type","dinner").execute()
+
+    _expiring = []
+    for it in _inv.data:
+        try:
+            ed = pd.to_datetime(it['expiry_date']).date()
+            if (ed - _today).days <= 2:
+                _expiring.append(it['item_name'].replace('*','').strip().title())
+        except: pass
+
+    _dinner = _meal_q.data[0]['meal_name'] if _meal_q.data else None
+    _sl_count = len(_sl.data) if _sl.data else 0
+
+    try:
+        _mood_today = supabase.table("mood_checkins").select("score").eq("user_id", user_id).eq("checkin_date", _today.isoformat()).execute()
+        _mood_done  = len(_mood_today.data) > 0
+        _mood_score = _mood_today.data[0]['score'] if _mood_today.data else None
+    except:
+        _mood_done = False
+        _mood_score = None
+
+    _brief_col, _mood_col = st.columns([3, 1])
+
+    with _brief_col:
+        _parts = []
+        if _expiring:
+            _elist = ", ".join(_expiring[:3]) + ("..." if len(_expiring) > 3 else "")
+            _parts.append("⏰ **Expiring:** " + _elist)
+        if _dinner:
+            _parts.append("🍽️ **Tonight:** " + _dinner)
+        if _sl_count:
+            _parts.append("🛒 **Shopping:** " + str(_sl_count) + " item" + ("s" if _sl_count != 1 else ""))
+        _lbl = "Today's Briefing" if st.session_state['lang']=='en' else "Resumen de Hoy"
+        _border = "#7A9E5F" if not _parts else "#C8952A"
+        _body   = "<br>".join(_parts) if _parts else ("✅ <strong>All good today!</strong>" if st.session_state['lang']=='en' else "✅ <strong>¡Todo bien hoy!</strong>")
+        st.markdown(
+            '<div style="background:white;border:1px solid #E8E4DE;border-left:4px solid ' + _border +             ';border-radius:12px;padding:12px 16px;margin-bottom:12px;">' +             '<div style="font-size:0.72rem;color:#6B6B6B;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">' + _lbl + '</div>' +             _body + '</div>',
+            unsafe_allow_html=True
+        )
+
+    with _mood_col:
+        _mood_emojis = ["😩","😕","😐","🙂","😊"]
+        if _mood_done and _mood_score:
+            _disp_emoji = _mood_emojis[_mood_score - 1]
+            st.markdown(
+                '<div style="background:white;border:1px solid #E8E4DE;border-radius:12px;padding:10px;text-align:center;margin-bottom:12px;">' +
+                '<div style="font-size:0.7rem;color:#6B6B6B;">' + ("Today's mood" if st.session_state['lang']=='en' else "Hoy") + '</div>' +
+                '<div style="font-size:1.8rem;">' + _disp_emoji + '</div></div>',
+                unsafe_allow_html=True
+            )
+        else:
+            _mlabel = "How are you?" if st.session_state['lang']=='en' else "¿Cómo estás?"
+            st.markdown('<div style="font-size:0.72rem;color:#6B6B6B;text-align:center;margin-bottom:4px;">' + _mlabel + '</div>', unsafe_allow_html=True)
+            _mcols = st.columns(5)
+            for _mi, (_mc, _me) in enumerate(zip(_mcols, _mood_emojis)):
+                if _mc.button(_me, key="mood_btn_" + str(_mi+1)):
+                    try:
+                        supabase.table("mood_checkins").upsert({
+                            "user_id": user_id, "checkin_date": _today.isoformat(), "score": _mi + 1
+                        }, on_conflict="user_id,checkin_date").execute()
+                    except:
+                        supabase.table("mood_checkins").insert({
+                            "user_id": user_id, "checkin_date": _today.isoformat(), "score": _mi + 1
+                        }).execute()
+                    st.rerun()
+except Exception as _be:
+    pass
+
+# --- MAIN TABS ---
+tab0, tab1, tab_pantry, tab2, tab3, tab4, tab_nutrition, tab_dump, tab5 = st.tabs([
     t('tab_impact'), t('tab_fridge'),
     "🏺 " + ("Pantry" if st.session_state['lang'] == 'en' else "Despensa"),
-    t('tab_shopping'), t('tab_meals'), t('tab_recipes'), t('tab_analytics')
+    t('tab_shopping'), t('tab_meals'), t('tab_recipes'),
+    "🥗 " + ("Nutrition" if st.session_state['lang'] == 'en' else "Nutrición"),
+    "🧠 " + ("Brain Dump" if st.session_state['lang'] == 'en' else "Descarga Mental"),
+    t('tab_analytics')
 ])
 
 with tab0:
@@ -1165,6 +1243,224 @@ with tab4:
         else:
             st.warning(recipes.get('error', t('no_recipes')))
 
+with tab_nutrition:
+    nutr_title = "🥗 Nutrition Goals" if st.session_state['lang'] == 'en' else "🥗 Metas Nutricionales"
+    st.header(nutr_title)
+    st.caption(
+        "Set your nutrition targets and we'll find the best portions from what you have." if st.session_state['lang'] == 'en'
+        else "Establece tus metas nutricionales y encontramos las mejores porciones de lo que tienes."
+    )
+
+    # ── Goal sliders ──
+    st.markdown("### 🎯 " + ("Your Goals" if st.session_state['lang'] == 'en' else "Tus Metas"))
+
+    g1, g2, g3, g4 = st.columns(4)
+    goal_cal  = g1.number_input("🔥 " + ("Calories" if st.session_state['lang'] == 'en' else "Calorías"),
+                                 min_value=0, max_value=2000, value=500, step=50)
+    goal_pro  = g2.number_input("💪 " + ("Protein (g)" if st.session_state['lang'] == 'en' else "Proteína (g)"),
+                                 min_value=0, max_value=200, value=30, step=5)
+    goal_carb = g3.number_input("🌾 " + ("Carbs (g)" if st.session_state['lang'] == 'en' else "Carbohidratos (g)"),
+                                 min_value=0, max_value=300, value=50, step=5)
+    goal_fat  = g4.number_input("🫒 " + ("Fat (g)" if st.session_state['lang'] == 'en' else "Grasa (g)"),
+                                 min_value=0, max_value=100, value=15, step=5)
+
+    # Visual goal bars
+    st.markdown("---")
+    bar_cols = st.columns(4)
+    macros = [
+        ("🔥", "Cal",  goal_cal,  2000, "#C8952A"),
+        ("💪", "Pro",  goal_pro,  200,  "#2D5016"),
+        ("🌾", "Carb", goal_carb, 300,  "#7A9E5F"),
+        ("🫒", "Fat",  goal_fat,  100,  "#C4572A"),
+    ]
+    for col, (icon, label, val, max_val, color) in zip(bar_cols, macros):
+        pct = min(int(val / max_val * 100), 100)
+        col.markdown(f"""
+        <div style="text-align:center; padding:12px; background:white; border-radius:12px; border:1px solid #E8E4DE;">
+            <div style="font-size:1.4rem;">{icon}</div>
+            <div style="font-family:'Fraunces',serif; font-size:1.3rem; font-weight:600; color:{color};">{val}</div>
+            <div style="font-size:0.7rem; color:#6B6B6B; margin-bottom:6px;">{label}</div>
+            <div style="background:#E8E4DE; border-radius:99px; height:6px;">
+                <div style="background:{color}; width:{pct}%; height:6px; border-radius:99px;"></div>
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Find meal suggestion ──
+    btn_label = "🔍 Find Best Meal From My Fridge" if st.session_state['lang'] == 'en' else "🔍 Encontrar la Mejor Comida de Mi Refrigerador"
+    if st.button(btn_label, type="primary", use_container_width=True):
+        try:
+            # Get all in-stock items
+            all_items = supabase.table("inventory").select("item_name, storage, category").eq("user_id", user_id).eq("status", "In Stock").execute()
+            if all_items.data:
+                goals = {"calories": goal_cal, "protein": goal_pro, "carbs": goal_carb, "fat": goal_fat}
+                with st.spinner("🤖 " + ("Finding the best match..." if st.session_state['lang'] == 'en' else "Buscando la mejor combinación...")):
+                    suggestion = suggest_portions_for_goals(all_items.data, goals, lang=st.session_state['lang'])
+                st.session_state['nutrition_suggestion'] = suggestion
+            else:
+                st.info("Add items to your fridge or pantry first!" if st.session_state['lang'] == 'en' else "¡Primero agrega artículos a tu refrigerador o despensa!")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+    # ── Show suggestion ──
+    if 'nutrition_suggestion' in st.session_state:
+        sug = st.session_state['nutrition_suggestion']
+        if "error" not in sug:
+            st.markdown("### 🍽️ " + (sug.get('meal_name', 'Suggested Meal')))
+
+            # Totals vs goals comparison
+            total = sug.get('total_nutrition', {})
+            t1, t2, t3, t4 = st.columns(4)
+            def render_vs(col, icon, label, actual, goal, color):
+                pct = min(int(actual / goal * 100), 100) if goal > 0 else 0
+                over = actual > goal
+                bar_color = "#C4572A" if over else color
+                col.markdown(f"""
+                <div style="text-align:center; padding:10px; background:white; border-radius:12px; border:2px solid {'#C4572A' if over else '#E8E4DE'};">
+                    <div style="font-size:1.1rem;">{icon}</div>
+                    <div style="font-family:'Fraunces',serif; font-size:1.1rem; font-weight:600; color:{bar_color};">{actual}</div>
+                    <div style="font-size:0.65rem; color:#6B6B6B;">of {goal} {label}</div>
+                    <div style="background:#E8E4DE; border-radius:99px; height:5px; margin-top:5px;">
+                        <div style="background:{bar_color}; width:{pct}%; height:5px; border-radius:99px;"></div>
+                    </div>
+                    {'<div style="font-size:0.65rem;color:#C4572A;">over goal</div>' if over else ''}
+                </div>""", unsafe_allow_html=True)
+
+            render_vs(t1, "🔥", "cal",  total.get('calories',0), goal_cal,  "#C8952A")
+            render_vs(t2, "💪", "g pro", total.get('protein',0),  goal_pro,  "#2D5016")
+            render_vs(t3, "🌾", "g carb",total.get('carbs',0),    goal_carb, "#7A9E5F")
+            render_vs(t4, "🫒", "g fat", total.get('fat',0),      goal_fat,  "#C4572A")
+
+            # Item breakdown
+            st.markdown("#### " + ("What to eat & how much:" if st.session_state['lang'] == 'en' else "Qué comer y cuánto:"))
+            for item in sug.get('items', []):
+                with st.container(border=True):
+                    ic1, ic2, ic3 = st.columns([1, 3, 4])
+                    ic1.markdown(f"<div style='font-size:2rem;text-align:center'>{item.get('emoji','🍽️')}</div>", unsafe_allow_html=True)
+                    ic2.markdown(f"**{item['name'].title()}**")
+                    ic2.markdown(f"<span style='background:#F5E6C8;color:#2D5016;padding:3px 10px;border-radius:20px;font-weight:600;font-size:0.9rem'>📏 {item['amount']}</span>", unsafe_allow_html=True)
+                    ic3.caption(f"🔥 {item.get('calories',0)} cal  💪 {item.get('protein',0)}g  🌾 {item.get('carbs',0)}g  🫒 {item.get('fat',0)}g")
+
+            if sug.get('tip'):
+                st.info(f"💡 {sug['tip']}")
+
+        else:
+            st.warning(sug.get('error', 'Could not generate suggestion. Try again.'))
+
+with tab_dump:
+    _dump_title = "🧠 Brain Dump" if st.session_state['lang']=='en' else "🧠 Descarga Mental"
+    st.header(_dump_title)
+    st.caption(
+        "Get it out of your head. Type anything — tasks, worries, ideas, reminders. Gemini will sort it for you." if st.session_state['lang']=='en'
+        else "Sácalo de tu cabeza. Escribe cualquier cosa: tareas, preocupaciones, ideas. Gemini lo organiza."
+    )
+
+    # ── Quick capture ──
+    with st.form("brain_dump_form", clear_on_submit=True):
+        dump_text = st.text_area(
+            "What's on your mind?" if st.session_state['lang']=='en' else "¿Qué tienes en mente?",
+            placeholder="milk is running low, call dentist, need to return Amazon package, Emma has soccer at 4pm..." if st.session_state['lang']=='en'
+            else "Se está acabando la leche, llamar al dentista, Emma tiene fútbol a las 4pm...",
+            height=100
+        )
+        col_ai, col_plain = st.columns(2)
+        submit_ai    = col_ai.form_submit_button(
+            "✨ Save + Sort with AI" if st.session_state['lang']=='en' else "✨ Guardar + Ordenar con IA",
+            use_container_width=True, type="primary"
+        )
+        submit_plain = col_plain.form_submit_button(
+            "💾 Just Save" if st.session_state['lang']=='en' else "💾 Solo Guardar",
+            use_container_width=True
+        )
+
+    if (submit_ai or submit_plain) and dump_text.strip():
+        if submit_ai:
+            # Ask Gemini to split into categorized items
+            try:
+                import requests as _req, json as _json
+                _api_key = st.secrets["GOOGLE_API_KEY"]
+                _lang_str = "Spanish" if st.session_state['lang']=='es' else "English"
+                _prompt = f"""Split this brain dump into individual items and assign each a category.
+Categories: grocery, task, appointment, reminder, idea, personal, worry, other
+
+Input: {dump_text}
+
+Return ONLY a JSON array:
+[
+  {{"text": "call dentist", "category": "appointment"}},
+  {{"text": "milk is running low", "category": "grocery"}}
+]
+Respond in {_lang_str}. Return ONLY JSON, no markdown."""
+                _r = _req.post(
+                    f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={_api_key}",
+                    json={{"contents": [{{"parts": [{{"text": _prompt}}]}}], "generationConfig": {{"temperature": 0.2}}}},
+                    timeout=15
+                )
+                _raw = _r.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                if "```" in _raw: _raw = _raw.split("```")[1]; _raw = _raw[4:] if _raw.startswith("json") else _raw
+                _items = _json.loads(_raw.strip())
+                for _item in _items:
+                    supabase.table("brain_dump").insert({
+                        "user_id": user_id,
+                        "content": _item.get("text", ""),
+                        "category": _item.get("category", "other"),
+                        "done": False
+                    }).execute()
+                st.toast(f"✨ Sorted {len(_items)} items!")
+            except Exception as _de:
+                # Fallback: save as single item
+                supabase.table("brain_dump").insert({"user_id": user_id, "content": dump_text, "category": "other", "done": False}).execute()
+                st.toast("💾 Saved!")
+        else:
+            supabase.table("brain_dump").insert({"user_id": user_id, "content": dump_text, "category": "other", "done": False}).execute()
+            st.toast("💾 Saved!")
+        st.rerun()
+
+    # ── Display items grouped by category ──
+    try:
+        _all_dumps = supabase.table("brain_dump").select("*").eq("user_id", user_id).eq("done", False).order("created_at", desc=True).execute()
+        _dumps = _all_dumps.data or []
+    except:
+        _dumps = []
+
+    if _dumps:
+        # Group by category
+        _cat_icons = {
+            "grocery":"🛒", "task":"✅", "appointment":"📅",
+            "reminder":"⏰", "idea":"💡", "personal":"💛",
+            "worry":"😟", "other":"📝"
+        }
+        _cats = {}
+        for _d in _dumps:
+            _c = _d.get("category","other")
+            _cats.setdefault(_c, []).append(_d)
+
+        # Show "Add to shopping list" button for grocery items
+        _grocery_items = _cats.get("grocery", [])
+        if _grocery_items:
+            if st.button("🛒 " + ("Move all groceries to Shopping List" if st.session_state['lang']=='en' else "Mover grocerías a Lista de Compras"), use_container_width=True):
+                for _gi in _grocery_items:
+                    try:
+                        supabase.table("shopping_list").insert({"user_id": user_id, "item_name": _gi['content'], "quantity": 1, "price": 0, "bought": False, "date_added": date.today().isoformat()}).execute()
+                        supabase.table("brain_dump").update({"done": True}).eq("id", _gi['id']).execute()
+                    except: pass
+                st.toast("🛒 Added to shopping list!")
+                st.rerun()
+
+        for _cat, _items in sorted(_cats.items()):
+            _icon = _cat_icons.get(_cat, "📝")
+            _cat_label = _cat.title()
+            st.markdown(f"**{_icon} {_cat_label}** ({len(_items)})")
+            for _item in _items:
+                _dc1, _dc2 = st.columns([8, 1])
+                _dc1.markdown(f"• {_item['content']}")
+                if _dc2.button("✓", key=f"done_dump_{_item['id']}"):
+                    supabase.table("brain_dump").update({"done": True}).eq("id", _item['id']).execute()
+                    st.rerun()
+    else:
+        st.info("🧠 " + ("Your head is clear! Add something above." if st.session_state['lang']=='en' else "¡Tu mente está despejada! Agrega algo arriba."))
+
 with tab5:
     st.header(t('analytics_title'))
     budget = db_get_budget()
@@ -1269,5 +1565,6 @@ with tab5:
             st.info("📊 " + ("Scan receipts from different stores to see which has the best prices." if st.session_state['lang'] == 'en' else "Escanea recibos de diferentes tiendas para ver cuál tiene los mejores precios."))
     except Exception as e:
         st.info("📊 " + ("Scan a few receipts to unlock price comparison." if st.session_state['lang'] == 'en' else "Escanea algunos recibos para activar la comparación de precios."))
+
 
 st.markdown('<div class="footer-text">' + t('built_with_love') + '</div>', unsafe_allow_html=True)
