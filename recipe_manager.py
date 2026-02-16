@@ -1,122 +1,171 @@
-import json
-import PIL.Image
-import streamlit as st
-import base64
 import requests
-import io
+import json
+import streamlit as st
 
-class ReceiptScanner:
-    def __init__(self):
-        try:
-            self.api_key = st.secrets["GOOGLE_API_KEY"]
-            self.active = True
-        except Exception as e:
-            self.active = False
-            print(f"Scanner Init Error: {e}")
+def suggest_recipes_from_list(ingredients, lang='en'):
+    """
+    Uses Gemini to suggest recipes based on expiring ingredients.
+    Returns list of recipe dicts compatible with existing app UI.
+    """
+    if not ingredients:
+        return {"error": "No expiring ingredients found."}
 
-    def scan_receipt(self, image_file):
-        if not self.active:
-            return {"error": "API Key missing. Add GOOGLE_API_KEY to Streamlit Secrets."}
+    try:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+    except Exception:
+        return {"error": "GOOGLE_API_KEY missing from Streamlit Secrets."}
 
-        try:
-            # File size check — reject files over 5MB
-            image_file.seek(0, 2)
-            size = image_file.tell()
-            image_file.seek(0)
-            if size > 5_000_000:
-                return {"error": "Image too large. Please use a photo under 5MB."}
+    # Language-specific instructions
+    if lang == 'es':
+        language_instruction = "Responde en español. Sugiere comidas latinoamericanas o mexicanas cuando sea apropiado."
+        cuisine_note = "Prioriza recetas latinoamericanas, mexicanas, o familiares para hogares hispanohablantes."
+    else:
+        language_instruction = "Respond in English."
+        cuisine_note = "Suggest practical home-cooking recipes, not overly fancy dishes."
 
-            # Convert image to base64
-            img = PIL.Image.open(image_file)
-            img.thumbnail((1024, 1024))
-            buffer = io.BytesIO()
-            img.save(buffer, format="JPEG")
-            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    # If too many ingredients, take a smart subset
+    # Prioritize shorter names (more likely to be real ingredients vs barcodes)
+    cleaned = sorted(ingredients, key=lambda x: len(x))[:12]
+    ingredients_str = ", ".join(cleaned)
 
-            prompt = """You are reading a grocery store receipt. Many receipts (especially Walmart) 
-use abbreviated or coded product names. Your job is to decode them into real food names.
+    prompt = f"""You are a helpful home cooking assistant. {language_instruction}
 
-Examples of Walmart abbreviations to decode:
-- "GV WHL MLK 1G" → "Whole Milk 1 Gallon"
-- "FZ CHKN BRST" → "Frozen Chicken Breast"  
-- "BNLS SKNLS CKN" → "Boneless Skinless Chicken"
-- "GV SLCD WHT BRD" → "White Bread"
-- "LG EGGS 18CT" → "Eggs 18 count"
-- "BTRMLK PNCKE MX" → "Buttermilk Pancake Mix"
-- "GV" or "SE" or "MM" at start = store brand, ignore the prefix
-- Numbers at end like "1G" "2L" "32OZ" = size, include it
+A home cook has these ingredients that need to be used soon:
+{ingredients_str}
+
+{cuisine_note}
+
+Suggest exactly 3 recipes that use as many of these ingredients as possible.
+
+Return ONLY a valid JSON array with exactly this structure:
+[
+  {{
+    "id": 1,
+    "title": "Recipe Name",
+    "image": "https://via.placeholder.com/150x100/FF6B6B/white?text=Recipe",
+    "usedIngredients": [
+      {{"name": "ingredient1"}},
+      {{"name": "ingredient2"}}
+    ],
+    "missedIngredients": [
+      {{"name": "ingredient3"}}
+    ],
+    "instructions": "Brief 2-3 sentence description of how to make it.",
+    "time": "30 minutes",
+    "difficulty": "Easy"
+  }}
+]
 
 Rules:
-1. Extract ONLY food and grocery items
-2. Skip: taxes, fees, totals, subtotals, rewards, store name, cashier info
-3. Decode abbreviations into plain English product names
-4. If you cannot decode something, make your best guess based on context
-5. Include the price for each item
+- usedIngredients = ingredients from the list above that this recipe uses
+- missedIngredients = common ingredients the recipe needs that aren't in the list
+- Keep missedIngredients to pantry staples only (salt, oil, garlic etc.)
+- Make the recipes realistic and practical for a home cook
+- Return ONLY the JSON array, no markdown, no explanation"""
 
-Return ONLY a valid JSON array:
-[{"item": "Whole Milk 1 Gallon", "price": 3.98, "qty": 1, "category": "Dairy"}]
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={api_key}"
 
-Categories: Dairy, Meat, Produce, Bakery, Pantry, Frozen, Beverages, Snacks, Other
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "temperature": 0.7
+        }
+    }
 
-Return ONLY the JSON array. No markdown, no explanation, no extra text."""
+    try:
+        response = requests.post(url, json=payload, timeout=20)
 
-            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={self.api_key}"
+        if response.status_code != 200:
+            return {"error": f"API Error {response.status_code}: {response.text[:200]}"}
 
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": img_base64
-                            }
-                        }
-                    ]
-                }],
-                "generationConfig": {
-                    "temperature": 0.1  # Low temperature = more precise, less creative
-                }
-            }
+        result = response.json()
+        raw_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
 
-            response = requests.post(url, json=payload, timeout=15)
+        # Clean markdown if present
+        if "```" in raw_text:
+            parts = raw_text.split("```")
+            raw_text = parts[1] if len(parts) > 1 else parts[0]
+            if raw_text.startswith("json"):
+                raw_text = raw_text[4:]
+        raw_text = raw_text.strip()
 
-            if response.status_code != 200:
-                return {"error": f"API Error {response.status_code}: {response.text[:200]}"}
+        recipes = json.loads(raw_text)
 
-            result = response.json()
-            raw_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+        # Generate placeholder images with recipe name
+        for i, recipe in enumerate(recipes):
+            colors = ["FF6B6B", "4ECDC4", "45B7D1"]
+            color = colors[i % len(colors)]
+            name_encoded = recipe['title'].replace(' ', '+')[:20]
+            recipe['image'] = f"https://via.placeholder.com/150x100/{color}/white?text={name_encoded}"
 
-            # Clean markdown if present
-            if "```" in raw_text:
-                parts = raw_text.split("```")
-                raw_text = parts[1] if len(parts) > 1 else parts[0]
-                if raw_text.startswith("json"):
-                    raw_text = raw_text[4:]
-            raw_text = raw_text.strip()
+        return recipes
 
-            items = json.loads(raw_text)
-            
-            # Clean up item names — remove common store brand prefixes
-            prefixes_to_remove = ["GV ", "SE ", "MM ", "EQ ", "MV ", "PL "]
-            for item in items:
-                name = item['item']
-                for prefix in prefixes_to_remove:
-                    if name.upper().startswith(prefix):
-                        name = name[len(prefix):]
-                item['item'] = name.title().strip()
-            
-            # Validate each item has expected fields before trusting AI output
-            safe_items = []
-            for item in items:
-                if (isinstance(item.get("item"), str) and
-                    isinstance(item.get("price"), (int, float)) and
-                    item.get("price", 0) >= 0 and
-                    item.get("price", 0) < 1000):  # sanity check — no $1000 grocery items
-                    safe_items.append(item)
-            return safe_items if safe_items else {"error": "No valid items found on receipt."}
+    except json.JSONDecodeError:
+        return {"error": "Could not parse recipe response. Try again."}
+    except Exception as e:
+        return {"error": f"Recipe lookup failed: {str(e)}"}
 
-        except json.JSONDecodeError:
-            return {"error": "Could not read receipt. Try a clearer, well-lit photo."}
-        except Exception as e:
-            return {"error": f"Scan failed: {str(e)}"}
+
+def get_recipe_details(recipe_title, ingredients, lang='en'):
+    """
+    Gets detailed instructions for a specific recipe.
+    Called when user wants to actually cook something.
+    """
+    try:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+    except Exception:
+        return {"error": "API key missing."}
+
+    if lang == 'es':
+        language_instruction = "Responde completamente en español."
+    else:
+        language_instruction = "Respond in English."
+
+    # If too many ingredients, take a smart subset
+    # Prioritize shorter names (more likely to be real ingredients vs barcodes)
+    cleaned = sorted(ingredients, key=lambda x: len(x))[:12]
+    ingredients_str = ", ".join(cleaned)
+
+    prompt = f"""{language_instruction}
+
+Give me a complete recipe for "{recipe_title}" using these available ingredients: {ingredients_str}
+
+Return ONLY valid JSON:
+{{
+  "title": "{recipe_title}",
+  "servings": 4,
+  "time": "30 minutes",
+  "ingredients": [
+    {{"item": "chicken breast", "amount": "1 lb"}},
+    {{"item": "salt", "amount": "1 tsp"}}
+  ],
+  "steps": [
+    "Step 1: ...",
+    "Step 2: ...",
+    "Step 3: ..."
+  ],
+  "tips": "One helpful cooking tip."
+}}
+
+Return ONLY the JSON, no markdown."""
+
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3}
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=20)
+        result = response.json()
+        raw_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+        if "```" in raw_text:
+            parts = raw_text.split("```")
+            raw_text = parts[1] if len(parts) > 1 else parts[0]
+            if raw_text.startswith("json"):
+                raw_text = raw_text[4:]
+        return json.loads(raw_text.strip())
+    except Exception as e:
+        return {"error": f"Could not get recipe details: {str(e)}"}
