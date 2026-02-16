@@ -472,6 +472,19 @@ try:
     _dinner = _meal_q.data[0]['meal_name'] if _meal_q.data else None
     _sl_count = len(_sl.data) if _sl.data else 0
 
+    # Current rhythm block
+    import datetime as _dt
+    _hour = _dt.datetime.now().hour
+    _cur_block = "morning" if _hour < 10 else "midday" if _hour < 13 else "afternoon" if _hour < 16 else "evening"
+    _cur_block_label = {"morning":"Morning","midday":"Midday","afternoon":"Afternoon","evening":"Evening"}.get(_cur_block,"")
+    try:
+        _rhythm_now = supabase.table("daily_rhythm").select("must_do,done").eq("user_id", user_id).eq("day_of_week", date.today().strftime("%A")).eq("block_id", _cur_block).execute()
+        _rhythm_must = _rhythm_now.data[0].get("must_do","") if _rhythm_now.data else ""
+        _rhythm_done = _rhythm_now.data[0].get("done", False) if _rhythm_now.data else False
+    except:
+        _rhythm_must = ""
+        _rhythm_done = False
+
     try:
         _mood_today = supabase.table("mood_checkins").select("score").eq("user_id", user_id).eq("checkin_date", _today.isoformat()).execute()
         _mood_done  = len(_mood_today.data) > 0
@@ -484,6 +497,8 @@ try:
 
     with _brief_col:
         _parts = []
+        if _rhythm_must and not _rhythm_done:
+            _parts.append("🌅 **Now (" + _cur_block_label + "):** " + _rhythm_must)
         if _expiring:
             _elist = ", ".join(_expiring[:3]) + ("..." if len(_expiring) > 3 else "")
             _parts.append("⏰ **Expiring:** " + _elist)
@@ -528,12 +543,13 @@ except Exception as _be:
     pass
 
 # --- MAIN TABS ---
-tab0, tab1, tab_pantry, tab2, tab3, tab4, tab_nutrition, tab_dump, tab5 = st.tabs([
+tab0, tab1, tab_pantry, tab2, tab3, tab4, tab_nutrition, tab_dump, tab_rhythm, tab5 = st.tabs([
     t('tab_impact'), t('tab_fridge'),
     "🏺 " + ("Pantry" if st.session_state['lang'] == 'en' else "Despensa"),
     t('tab_shopping'), t('tab_meals'), t('tab_recipes'),
     "🥗 " + ("Nutrition" if st.session_state['lang'] == 'en' else "Nutrición"),
     "🧠 " + ("Brain Dump" if st.session_state['lang'] == 'en' else "Descarga Mental"),
+    "🌅 " + ("Daily Rhythm" if st.session_state['lang'] == 'en' else "Ritmo Diario"),
     t('tab_analytics')
 ])
 
@@ -1038,6 +1054,74 @@ with tab_pantry:
 
 with tab2:
     st.header(t('shopping_list_title'))
+
+    # Whiteboard / handwritten list scanner
+    with st.expander("📸 " + ("Scan Whiteboard or Written List" if st.session_state['lang']=='en' else "Escanear Pizarrón o Lista"), expanded=False):
+        st.caption("Photo of a whiteboard, notepad, sticky note -- Gemini reads it and adds items." if st.session_state['lang']=='en'
+                   else "Foto de un pizarron o lista escrita -- Gemini la lee y agrega los articulos.")
+        wb_photo = st.camera_input("Point camera at your list" if st.session_state['lang']=='en' else "Apunta la camara a tu lista")
+        if not wb_photo:
+            wb_photo = st.file_uploader("Or upload a photo" if st.session_state['lang']=='en' else "O sube una foto",
+                                        type=["jpg","jpeg","png"], key="wb_upload")
+        if wb_photo:
+            if st.button("Read List", type="primary", use_container_width=True, key="wb_read_btn"):
+                with st.spinner("Reading your list..." if st.session_state['lang']=='en' else "Leyendo tu lista..."):
+                    try:
+                        import base64 as _b64lib, requests as _wreq, json as _wjson
+                        _api_key = st.secrets["GOOGLE_API_KEY"]
+                        _img_bytes = wb_photo.getvalue()
+                        _b64_str = _b64lib.b64encode(_img_bytes).decode()
+                        _lang_str = "Spanish" if st.session_state['lang']=='es' else "English"
+                        _prompt = (
+                            "This is a photo of a handwritten shopping list or whiteboard. "
+                            "Extract every grocery or household item you can read. "
+                            "Return ONLY a JSON array of item name strings, like: "
+                            '["milk", "eggs", "bread"] '
+                            "If nothing is readable, return []. "
+                            "Respond in " + _lang_str + ". Return ONLY the JSON array."
+                        )
+                        _payload = {
+                            "contents": [{
+                                "parts": [
+                                    {"inline_data": {"mime_type": "image/jpeg", "data": _b64_str}},
+                                    {"text": _prompt}
+                                ]
+                            }],
+                            "generationConfig": {"temperature": 0.1}
+                        }
+                        _r = _wreq.post(
+                            "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=" + _api_key,
+                            json=_payload, timeout=20
+                        )
+                        _raw = _r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        if "```" in _raw:
+                            _raw = _raw.split("```")[1]
+                            if _raw.startswith("json"): _raw = _raw[4:]
+                        _detected = _wjson.loads(_raw.strip())
+                        if _detected:
+                            st.session_state["wb_items"] = _detected
+                        else:
+                            st.warning("Could not read any items. Try a clearer photo." if st.session_state['lang']=='en'
+                                       else "No se pudieron leer articulos. Intenta con una foto mas clara.")
+                    except Exception as _we:
+                        st.error(f"Error reading image: {_we}")
+
+        if st.session_state.get("wb_items"):
+            st.markdown("**" + ("Detected -- uncheck any to skip:" if st.session_state['lang']=='en' else "Detectados -- desmarca los que no quieras:") + "**")
+            _sel = []
+            for _wi, _wname in enumerate(st.session_state["wb_items"]):
+                if st.checkbox(_wname.title(), value=True, key=f"wb_chk_{_wi}"):
+                    _sel.append(_wname)
+            if _sel and st.button(
+                f"Add {len(_sel)} items to Shopping List" if st.session_state['lang']=='en' else f"Agregar {len(_sel)} articulos",
+                type="primary", use_container_width=True, key="wb_add_btn"
+            ):
+                for _si in _sel:
+                    db_add_to_shopping_list(_si, 0)
+                st.toast(f"Added {len(_sel)} items to your list!")
+                del st.session_state["wb_items"]
+                st.rerun()
+
     shop_df = db_get_shopping_list()
     if not shop_df.empty:
         st.metric(t('items_to_buy'), len(shop_df))
@@ -1347,6 +1431,135 @@ with tab_nutrition:
 
         else:
             st.warning(sug.get('error', 'Could not generate suggestion. Try again.'))
+
+with tab_rhythm:
+    _rh_title = "🌅 Daily Rhythm" if st.session_state['lang']=='en' else "🌅 Ritmo Diario"
+    st.header(_rh_title)
+    st.caption(
+        "Anchor points for your day -- not a strict schedule. One must-do, one nice-to-have per block."
+        if st.session_state['lang']=='en' else
+        "Puntos de ancla para tu dia -- no un horario estricto. Un deber y un opcional por bloque."
+    )
+
+    # Default blocks
+    _default_blocks = [
+        {"id": "morning",   "label": "Morning",   "emoji": "🌅", "time": "7-10am"},
+        {"id": "midday",    "label": "Midday",    "emoji": "☀️",  "time": "10am-1pm"},
+        {"id": "afternoon", "label": "Afternoon", "emoji": "🌤️", "time": "1-4pm"},
+        {"id": "evening",   "label": "Evening",   "emoji": "🌙", "time": "4-7pm"},
+    ]
+    _default_blocks_es = [
+        {"id": "morning",   "label": "Mañana",    "emoji": "🌅", "time": "7-10am"},
+        {"id": "midday",    "label": "Mediodia",  "emoji": "☀️",  "time": "10am-1pm"},
+        {"id": "afternoon", "label": "Tarde",     "emoji": "🌤️", "time": "1-4pm"},
+        {"id": "evening",   "label": "Noche",     "emoji": "🌙", "time": "4-7pm"},
+    ]
+    _blocks = _default_blocks_es if st.session_state['lang']=='es' else _default_blocks
+
+    # Load saved rhythm from Supabase
+    _today_str = date.today().isoformat()
+    _dow = date.today().strftime("%A")  # Monday, Tuesday...
+
+    try:
+        _saved = supabase.table("daily_rhythm").select("*").eq("user_id", user_id).eq("day_of_week", _dow).execute()
+        _saved_map = {r["block_id"]: r for r in (_saved.data or [])}
+    except:
+        _saved_map = {}
+
+    st.markdown("### " + (_dow if st.session_state['lang']=='en' else _dow))
+
+    _must_label  = "Must do" if st.session_state['lang']=='en' else "Obligatorio"
+    _nice_label  = "Nice to have" if st.session_state['lang']=='en' else "Opcional"
+    _done_label  = "Done" if st.session_state['lang']=='en' else "Hecho"
+    _save_label  = "Save Rhythm" if st.session_state['lang']=='en' else "Guardar Ritmo"
+
+    _any_changed = False
+    _updates = {}
+
+    for _blk in _blocks:
+        _bid = _blk["id"]
+        _saved_blk = _saved_map.get(_bid, {})
+        _must_val  = _saved_blk.get("must_do", "")
+        _nice_val  = _saved_blk.get("nice_to_have", "")
+        _done_val  = _saved_blk.get("done", False)
+
+        with st.container(border=True):
+            _hcol, _dcol = st.columns([5, 1])
+            _hcol.markdown(f"**{_blk['emoji']} {_blk['label']}** `{_blk['time']}`")
+            _done_check = _dcol.checkbox(_done_label, value=_done_val, key=f"rh_done_{_bid}")
+
+            _c1, _c2 = st.columns(2)
+            _must_input = _c1.text_input(
+                f"✅ {_must_label}",
+                value=_must_val,
+                placeholder=("e.g. Lunch for kids" if st.session_state['lang']=='en' else "p.ej. Almuerzo para los ninos"),
+                key=f"rh_must_{_bid}"
+            )
+            _nice_input = _c2.text_input(
+                f"⭐ {_nice_label}",
+                value=_nice_val,
+                placeholder=("e.g. Park walk" if st.session_state['lang']=='en' else "p.ej. Paseo al parque"),
+                key=f"rh_nice_{_bid}"
+            )
+            _updates[_bid] = {
+                "must_do": _must_input,
+                "nice_to_have": _nice_input,
+                "done": _done_check
+            }
+
+    if st.button(_save_label, type="primary", use_container_width=True, key="rh_save"):
+        try:
+            for _bid, _udata in _updates.items():
+                _existing = _saved_map.get(_bid)
+                _row = {
+                    "user_id": user_id,
+                    "day_of_week": _dow,
+                    "block_id": _bid,
+                    "must_do": _udata["must_do"],
+                    "nice_to_have": _udata["nice_to_have"],
+                    "done": _udata["done"]
+                }
+                if _existing:
+                    supabase.table("daily_rhythm").update(_row).eq("id", _existing["id"]).execute()
+                else:
+                    supabase.table("daily_rhythm").insert(_row).execute()
+            st.toast("Rhythm saved!" if st.session_state['lang']=='en' else "Ritmo guardado!")
+            st.rerun()
+        except Exception as _re:
+            st.error(f"Error saving: {_re}")
+
+    # Progress summary
+    _done_count = sum(1 for b in _blocks if _updates.get(b["id"], {}).get("done", False))
+    _total = len(_blocks)
+    if _done_count > 0:
+        st.markdown("---")
+        _prog_pct = int(_done_count / _total * 100)
+        st.markdown(f"**{'Today:' if st.session_state['lang']=='en' else 'Hoy:'} {_done_count}/{_total} blocks done**")
+        st.progress(_prog_pct / 100)
+        if _done_count == _total:
+            st.success("Full day done. That is enough." if st.session_state['lang']=='en' else "Dia completo. Eso es suficiente.")
+
+    # Bare minimum mode
+    st.markdown("---")
+    with st.expander("🔋 " + ("Bare Minimum Mode -- tough day?" if st.session_state['lang']=='en' else "Modo Minimo -- dia dificil?")):
+        st.caption(
+            "On hard days, this is all that matters. Everything else can wait."
+            if st.session_state['lang']=='en' else
+            "En dias dificiles, solo esto importa. Todo lo demas puede esperar."
+        )
+        _bm_items = [
+            ("🍽️", "Feed the kids" if st.session_state['lang']=='en' else "Dar de comer a los ninos"),
+            ("💧", "Keep everyone hydrated" if st.session_state['lang']=='en' else "Mantener a todos hidratados"),
+            ("😴", "Nap/rest when they rest" if st.session_state['lang']=='en' else "Descansar cuando ellos descansan"),
+            ("❤️", "One moment of connection" if st.session_state['lang']=='en' else "Un momento de conexion"),
+        ]
+        for _icon, _item in _bm_items:
+            st.markdown(f"{_icon} {_item}")
+        st.info(
+            "You showed up today. That is the job."
+            if st.session_state['lang']=='en' else
+            "Apareciste hoy. Eso es el trabajo."
+        )
 
 with tab_dump:
     _dump_title = "🧠 Brain Dump" if st.session_state['lang']=='en' else "🧠 Descarga Mental"
