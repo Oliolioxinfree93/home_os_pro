@@ -6,13 +6,15 @@ import requests
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
-from meals_engine import MealsEngine, build_generation_prompt
+
 
 from datetime import date, timedelta, datetime
 from supabase import create_client
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+
+from meals_engine import MealsEngine, build_generation_prompt
 
 from translations import get_text
 from styles import get_css
@@ -2402,5 +2404,6 @@ with area_insights:
 # FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="footer-text">' + t("built_with_love") + "</div>", unsafe_allow_html=True)
+
 
 
