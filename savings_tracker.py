@@ -164,12 +164,19 @@ class SavingsTracker:
             price_paid, store_used = current
             
             # Get highest price from other stores (last 90 days)
-            cursor.execute('''
-            SELECT MAX(price) FROM price_history
-            WHERE item_name = ?
-            AND store != ?
-            AND date_recorded > ?
-            ''', (item_name, store_used if store_used else '', start_date - timedelta(days=90)))
+            if store_used:
+                cursor.execute('''
+                SELECT MAX(price) FROM price_history
+                WHERE item_name = ?
+                AND store != ?
+                AND date_recorded > ?
+                ''', (item_name, store_used, start_date - timedelta(days=90)))
+            else:
+                cursor.execute('''
+                SELECT MAX(price) FROM price_history
+                WHERE item_name = ?
+                AND date_recorded > ?
+                ''', (item_name, start_date - timedelta(days=90)))
             
             max_other_price = cursor.fetchone()[0]
             if max_other_price and max_other_price > price_paid:

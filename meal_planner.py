@@ -18,6 +18,8 @@ class MealPlanner:
         cursor = conn.cursor()
         
         # If recipe_id provided, fetch details from API
+        calories = None
+        prep_time = None
         if recipe_id and self.api_key:
             recipe_details = self._fetch_recipe_details(recipe_id)
             if recipe_details:
@@ -26,14 +28,13 @@ class MealPlanner:
                 ingredients = json.dumps(recipe_details['ingredients'])
                 calories = recipe_details.get('calories')
                 prep_time = recipe_details.get('readyInMinutes')
-        
+
         cursor.execute('''
-        INSERT INTO meal_plan (date, meal_type, recipe_id, recipe_name, 
+        INSERT INTO meal_plan (date, meal_type, recipe_id, recipe_name,
                                recipe_image, servings, ingredients, calories, prep_time)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (date, meal_type, recipe_id, recipe_name, recipe_image, 
-              servings, ingredients, calories if 'calories' in locals() else None,
-              prep_time if 'prep_time' in locals() else None))
+        ''', (date, meal_type, recipe_id, recipe_name, recipe_image,
+              servings, ingredients, calories, prep_time))
         
         conn.commit()
         conn.close()

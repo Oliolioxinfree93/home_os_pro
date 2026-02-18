@@ -85,7 +85,10 @@ Return ONLY the JSON array. No markdown, no explanation, no extra text."""
                 return {"error": f"API Error {response.status_code}: {response.text[:200]}"}
 
             result = response.json()
-            raw_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+            candidates = result.get('candidates')
+            if not candidates or not candidates[0].get('content') or not candidates[0]['content'].get('parts'):
+                return {"error": "Unexpected response from AI service. Please try again."}
+            raw_text = candidates[0]['content']['parts'][0]['text'].strip()
 
             # Clean markdown if present
             if "```" in raw_text:

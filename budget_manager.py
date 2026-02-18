@@ -80,8 +80,11 @@ class BudgetManager:
                 'percentage': percentage,
                 'threshold': threshold * 100,
                 'start_date': start_date,
-                'status': 'over_budget' if spent > limit else 
-                         'warning' if percentage >= threshold * 100 else 'good'
+                'status': (
+                    'over_budget' if spent > limit
+                    else 'warning' if percentage >= threshold * 100
+                    else 'good'
+                )
             }
         
         return None

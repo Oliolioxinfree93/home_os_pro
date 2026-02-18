@@ -23,7 +23,7 @@ class InventoryLogic:
         
         # 2. Identify Core Item
         matched_key = None
-        for key in self.rules:
+        for key in sorted(self.rules, key=len, reverse=True):
             if key in raw_name:
                 matched_key = key
                 break

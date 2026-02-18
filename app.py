@@ -29,8 +29,9 @@ from receipt_scanner import ReceiptScanner
 # ──────────────────────────────────────────────────────────────────────────────
 # ENV / CONFIG
 # ──────────────────────────────────────────────────────────────────────────────
-# Only disable HTTPS requirement in local dev, never in production
-if os.getenv("ENV") == "dev":
+# Only disable HTTPS requirement on localhost dev — never set ENV=dev in production
+_server_addr = os.getenv("STREAMLIT_SERVER_ADDRESS", "localhost")
+if os.getenv("ENV") == "dev" and _server_addr in ("localhost", "127.0.0.1"):
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 st.set_page_config(
@@ -362,26 +363,27 @@ def db_get_budget():
         return {"budget_limit": 500.0, "current_spent": 0}
 
 
-def db_calculate_savings():
+@st.cache_data(ttl=300)
+def db_calculate_savings(uid):
     try:
         som = date.today().replace(day=1).isoformat()
 
-        meals = supabase.table("meal_plan").select("id").eq("user_id", user_id).gte("date", som).execute()
+        meals = get_supabase().table("meal_plan").select("id").eq("user_id", uid).gte("date", som).execute()
         mc = len(meals.data) if meals.data else 0
 
         trips = (
-            supabase.table("price_history")
+            get_supabase().table("price_history")
             .select("date_recorded")
-            .eq("user_id", user_id)
+            .eq("user_id", uid)
             .gte("date_recorded", som)
             .execute()
         )
         ud = len(set([r["date_recorded"] for r in (trips.data or [])]))
 
         consumed = (
-            supabase.table("inventory")
+            get_supabase().table("inventory")
             .select("price")
-            .eq("user_id", user_id)
+            .eq("user_id", uid)
             .eq("status", "Consumed")
             .gte("date_added", som)
             .execute()
@@ -527,7 +529,7 @@ if st.sidebar.button(t("sign_out"), use_container_width=True):
 
 st.sidebar.markdown("---")
 
-savings = db_calculate_savings()
+savings = db_calculate_savings(user_id)
 st.sidebar.subheader(t("monthly_impact"))
 if savings["total_monthly_savings"] > 0:
     st.sidebar.success(f"{t('saved_this_month')}: ${savings['total_monthly_savings']:.2f}")

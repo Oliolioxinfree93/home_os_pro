@@ -43,12 +43,17 @@ Rules:
 
     try:
         r = requests.post(url, json=payload, timeout=15)
-        raw = r.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+        candidates = r.json().get('candidates')
+        if not candidates:
+            return {}
+        raw = candidates[0]['content']['parts'][0]['text'].strip()
         if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"): raw = raw[4:]
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
         return json.loads(raw.strip())
-    except:
+    except Exception:
         return {}
 
 
@@ -113,10 +118,15 @@ Only use items from the list provided. Return ONLY JSON."""
 
     try:
         r = requests.post(url, json=payload, timeout=20)
-        raw = r.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+        candidates = r.json().get('candidates')
+        if not candidates:
+            return {"error": "No response from AI service."}
+        raw = candidates[0]['content']['parts'][0]['text'].strip()
         if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"): raw = raw[4:]
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
         return json.loads(raw.strip())
     except Exception as e:
         return {"error": str(e)}
