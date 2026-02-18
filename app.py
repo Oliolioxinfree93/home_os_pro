@@ -481,12 +481,12 @@ def db_consume_ingredients(ingredient_names):
 # INIT USER SESSION
 # ──────────────────────────────────────────────────────────────────────────────
 user_id = check_login()
+user_name = st.session_state.get("user_name", "Friend")
+user_picture = st.session_state.get("user_picture", "")
+
 # --- Meals Engine (must be after login) ---
 from meals_engine import MealsEngine, build_generation_prompt
 meals_engine = MealsEngine(supabase, user_id)
-
-user_name = st.session_state.get("user_name", "Friend")
-user_picture = st.session_state.get("user_picture", "")
 
 scanner = BarcodeScanner()
 receipt_scanner_obj = ReceiptScanner()
@@ -1727,49 +1727,212 @@ with area_planning:
     tab_meals, tab_shopping, tab_recipes = st.tabs([t("tab_meals"), t("tab_shopping"), t("tab_recipes")])
         # --- MEALS TAB ---
     with tab_meals:
+    ui_section("Meals", "Track what each child actually eats + generate meals based on preferences.")
 
-        st.header("🍽 Child Meal Tracker")
+    # -------------------------
+    # Load children
+    # -------------------------
+    children_df = meals_engine.get_children_df()
+    children = []
+    if not children_df.empty:
+        children = [(int(r["id"]), r["child_name"]) for _, r in children_df.iterrows()]
 
-        child_name = st.text_input("Child name")
+    colA, colB = st.columns([1, 1], gap="large")
 
-        meal = st.text_input("Meal served")
+    # -------------------------
+    # Add Child
+    # -------------------------
+    with colA:
+        ui_card_start()
+        st.subheader("👶 Add Child")
 
-        liked = st.radio(
-            "Did they like it?",
-            ["Loved it", "It was ok", "Didn't like it"],
-            horizontal=True
-        )
+        new_child_name = st.text_input("Child name", placeholder="e.g. Mateo", key="child_name_add")
+        new_child_birthdate = st.date_input("Birthdate (optional)", value=None, key="child_birthdate_add")
+        new_child_notes = st.text_area("Notes (optional)", placeholder="Allergies, texture issues, etc.", key="child_notes_add")
 
-        if st.button("Save Meal Result"):
-
-            supabase.table("meal_feedback").insert({
-                "user_id": user_id,
-                "child": child_name,
-                "meal": meal,
-                "rating": liked,
-                "date": str(date.today())
-            }).execute()
-
-            st.success("Saved!")
-
-        st.divider()
-
-        st.subheader("Suggested Meals")
-
-        data = supabase.table("meal_feedback").select("*").eq("user_id", user_id).execute()
-
-        if data.data:
-
-            df = pd.DataFrame(data.data)
-            liked_df = df[df["rating"] == "Loved it"]
-
-            if not liked_df.empty:
-                for _, row in liked_df.iterrows():
-                    st.markdown(f"✅ **{row['meal']}** — {row['child']}")
+        if st.button("Add Child", type="primary", use_container_width=True):
+            birth_str = new_child_birthdate.isoformat() if new_child_birthdate else None
+            ok, msg = meals_engine.add_child(new_child_name, birth_str, new_child_notes)
+            if ok:
+                toast_saved()
+                st.rerun()
             else:
-                st.info("No favorite meals yet.")
+                st.error(msg)
+
+        ui_card_end()
+
+    # -------------------------
+    # Record Feedback
+    # -------------------------
+    with colB:
+        ui_card_start()
+        st.subheader("🍽️ Log Meal Feedback")
+
+        if not children:
+            st.info("Add a child first.")
+            ui_card_end()
         else:
-            st.info("No meals tracked yet.")
+            child_label_map = {f"{name} (id {cid})": cid for cid, name in children}
+            child_choice = st.selectbox("Child", list(child_label_map.keys()), key="child_pick_feedback")
+            child_id = child_label_map[child_choice]
+
+            meal_name = st.text_input("Meal name", placeholder="e.g. chicken tacos", key="meal_name_feedback")
+
+            # Pull ingredient suggestions from inventory
+            inv_ings = meals_engine.get_inventory_ingredients()
+            ingredient_mode = st.radio("Ingredients input", ["Pick from inventory", "Type manually"], horizontal=True)
+
+            if ingredient_mode == "Pick from inventory":
+                ingredients = st.multiselect(
+                    "Ingredients in the meal (select what was in it)",
+                    options=inv_ings,
+                    default=[],
+                    key="meal_ingredients_pick",
+                )
+            else:
+                ingredients_text = st.text_input("Ingredients (comma-separated)", placeholder="chicken, tortillas, cheese", key="meal_ingredients_text")
+                ingredients = [x.strip() for x in ingredients_text.split(",") if x.strip()]
+
+            ate = st.toggle("Child ate it", value=True, key="meal_ate_toggle")
+            liked = st.toggle("Child liked it", value=True, key="meal_liked_toggle")
+            rating = st.slider("Rating (optional)", min_value=1, max_value=5, value=4, key="meal_rating_slider")
+            notes = st.text_area("Notes (optional)", placeholder="Loved the sauce, hated texture, only ate if cut small...", key="meal_notes_feedback")
+
+            if st.button("Save Feedback", type="primary", use_container_width=True):
+                ok, msg = meals_engine.record_feedback(
+                    child_id=child_id,
+                    meal_name=meal_name,
+                    ingredients=ingredients,
+                    ate=ate,
+                    liked=liked,
+                    rating=rating,
+                    notes=notes,
+                )
+                if ok:
+                    toast_saved()
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+            ui_card_end()
+
+    st.divider()
+
+    # -------------------------
+    # Generate meals: family vs individual
+    # -------------------------
+    ui_section("Generate Meals", "Family meals or per-child meals based on what they like / refuse.")
+
+    ui_card_start()
+
+    scope = st.radio("Generate for", ["Family", "Individual child"], horizontal=True, key="meal_scope")
+    meal_count = st.number_input("How many meals?", min_value=3, max_value=14, value=6, step=1, key="meal_count")
+    style = st.selectbox(
+        "Style",
+        ["simple family-friendly", "high-protein", "budget-friendly", "quick 15-minute", "healthy kid-friendly", "Mexican-inspired", "comfort food"],
+        index=0,
+        key="meal_style",
+    )
+
+    constraints = []
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.checkbox("No pork", value=False): constraints.append("No pork")
+        if st.checkbox("No nuts", value=False): constraints.append("No nuts")
+    with c2:
+        if st.checkbox("Dairy-free", value=False): constraints.append("Dairy-free")
+        if st.checkbox("Gluten-free", value=False): constraints.append("Gluten-free")
+    with c3:
+        if st.checkbox("Low sugar", value=False): constraints.append("Low sugar")
+        if st.checkbox("Vegetarian", value=False): constraints.append("Vegetarian")
+
+    child_name = None
+    child_id = None
+
+    if scope == "Individual child":
+        if not children:
+            st.info("Add a child first.")
+        else:
+            child_label_map2 = {f"{name} (id {cid})": (cid, name) for cid, name in children}
+            picked = st.selectbox("Which child?", list(child_label_map2.keys()), key="meal_child_pick_generate")
+            child_id, child_name = child_label_map2[picked]
+
+    # Build prompt
+    available = meals_engine.get_inventory_ingredients()
+    if scope == "Family":
+        prefs = meals_engine.get_family_prefs()
+        prompt = build_generation_prompt(
+            available_ingredients=available,
+            likes=prefs.likes,
+            dislikes=prefs.dislikes,
+            scope="family",
+            child_name=None,
+            meal_count=int(meal_count),
+            style=style,
+            constraints=constraints,
+        )
+    else:
+        if child_id is None:
+            prompt = ""
+        else:
+            prefs = meals_engine.get_child_prefs(child_id)
+            prompt = build_generation_prompt(
+                available_ingredients=available,
+                likes=prefs.likes,
+                dislikes=prefs.dislikes,
+                scope="child",
+                child_name=child_name,
+                meal_count=int(meal_count),
+                style=style,
+                constraints=constraints,
+            )
+
+    with st.expander("🔧 See generation prompt (debug)", expanded=False):
+        st.code(prompt or "Pick a child to generate.", language="text")
+
+    if st.button("✨ Generate meals with AI", type="primary", use_container_width=True, disabled=not bool(prompt)):
+        # --- Call Gemini (optional)
+        # If you already have a Gemini helper elsewhere, replace this block with your existing function.
+        try:
+            import google.generativeai as genai
+
+            api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+            if not api_key:
+                st.error("Missing GEMINI_API_KEY in Streamlit secrets.")
+            else:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-2.0-flash")
+                with st.spinner("Thinking..."):
+                    out = model.generate_content(prompt)
+                st.markdown(out.text)
+        except Exception as e:
+            st.error("AI generation failed.")
+            st.exception(e)
+
+    ui_card_end()
+
+    st.divider()
+
+    # -------------------------
+    # Recent feedback table (safe)
+    # -------------------------
+    ui_section("Recent Feedback", "What your kids have been saying with their plates.")
+
+    try:
+        feedback_df = meals_engine.get_feedback_df()
+    except Exception:
+        feedback_df = pd.DataFrame()
+
+    if feedback_df.empty:
+        st.info("No feedback yet — log a meal above.")
+    else:
+        # Make it prettier
+        show = feedback_df.copy()
+        if "ingredients" in show.columns:
+            show["ingredients"] = show["ingredients"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+        show = show[["created_at", "child_id", "meal_name", "ate", "liked", "rating", "ingredients", "notes"]].head(50)
+        st.dataframe(show, use_container_width=True)
+
 
 
 
@@ -2408,6 +2571,7 @@ with area_insights:
 # FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="footer-text">' + t("built_with_love") + "</div>", unsafe_allow_html=True)
+
 
 
 
