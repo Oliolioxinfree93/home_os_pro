@@ -1719,6 +1719,53 @@ with area_inventory:
 # ──────────────────────────────────────────────────────────────────────────────
 with area_planning:
     tab_meals, tab_shopping, tab_recipes = st.tabs([t("tab_meals"), t("tab_shopping"), t("tab_recipes")])
+        # --- MEALS TAB ---
+    with tab_meals:
+
+        st.header("🍽 Child Meal Tracker")
+
+        child_name = st.text_input("Child name")
+
+        meal = st.text_input("Meal served")
+
+        liked = st.radio(
+            "Did they like it?",
+            ["Loved it", "It was ok", "Didn't like it"],
+            horizontal=True
+        )
+
+        if st.button("Save Meal Result"):
+
+            supabase.table("meal_feedback").insert({
+                "user_id": user_id,
+                "child": child_name,
+                "meal": meal,
+                "rating": liked,
+                "date": str(date.today())
+            }).execute()
+
+            st.success("Saved!")
+
+        st.divider()
+
+        st.subheader("Suggested Meals")
+
+        data = supabase.table("meal_feedback").select("*").eq("user_id", user_id).execute()
+
+        if data.data:
+
+            df = pd.DataFrame(data.data)
+            liked_df = df[df["rating"] == "Loved it"]
+
+            if not liked_df.empty:
+                for _, row in liked_df.iterrows():
+                    st.markdown(f"✅ **{row['meal']}** — {row['child']}")
+            else:
+                st.info("No favorite meals yet.")
+        else:
+            st.info("No meals tracked yet.")
+
+
 
     # ── SHOPPING ──
     with tab_shopping:
@@ -2355,4 +2402,5 @@ with area_insights:
 # FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="footer-text">' + t("built_with_love") + "</div>", unsafe_allow_html=True)
+
 
