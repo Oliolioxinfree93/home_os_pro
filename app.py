@@ -1727,7 +1727,7 @@ with area_planning:
     tab_meals, tab_shopping, tab_recipes = st.tabs([t("tab_meals"), t("tab_shopping"), t("tab_recipes")])
         # --- MEALS TAB ---
     with tab_meals:
-    ui_section("Meals", "Track what each child actually eats + generate meals based on preferences.")
+        ui_section("Meals", "Track what each child actually eats + generate meals based on preferences.")
 
     # -------------------------
     # Load children
@@ -2571,6 +2571,7 @@ with area_insights:
 # FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="footer-text">' + t("built_with_love") + "</div>", unsafe_allow_html=True)
+
 
 
 
