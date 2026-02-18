@@ -542,16 +542,65 @@ try:
 except Exception as _be:
     pass
 
-# --- MAIN TABS ---
-tab0, tab1, tab_pantry, tab2, tab3, tab4, tab_nutrition, tab_dump, tab_rhythm, tab5 = st.tabs([
-    t('tab_impact'), t('tab_fridge'),
-    "🏺 " + ("Pantry" if st.session_state['lang'] == 'en' else "Despensa"),
-    t('tab_shopping'), t('tab_meals'), t('tab_recipes'),
-    "🥗 " + ("Nutrition" if st.session_state['lang'] == 'en' else "Nutrición"),
-    "🧠 " + ("Brain Dump" if st.session_state['lang'] == 'en' else "Descarga Mental"),
-    "🌅 " + ("Daily Rhythm" if st.session_state['lang'] == 'en' else "Ritmo Diario"),
-    t('tab_analytics')
+# --- MAIN NAVIGATION (PATCH 1: IA REORG) ---
+area_home, area_inventory, area_planning, area_health, area_insights = st.tabs([
+    "🏠 " + ("Home" if st.session_state['lang'] == 'en' else "Inicio"),
+    "📦 " + ("Inventory" if st.session_state['lang'] == 'en' else "Inventario"),
+    "🗓️ " + ("Planning" if st.session_state['lang'] == 'en' else "Planificación"),
+    "🥗 " + ("Health" if st.session_state['lang'] == 'en' else "Salud"),
+    "📊 " + ("Insights" if st.session_state['lang'] == 'en' else "Insights")
 ])
+
+# Home area
+with area_home:
+    st.title("🏠 " + ("Home" if st.session_state['lang'] == 'en' else "Inicio"))
+    st.caption("At-a-glance dashboard" if st.session_state['lang'] == 'en' else "Panel rápido")
+    _home_savings = globals().get('savings') if isinstance(globals().get('savings'), dict) else {}
+    _saved_val = f"${_home_savings['total_monthly_savings']:.2f}" if 'total_monthly_savings' in _home_savings else "—"
+    _meals_val = f"{_home_savings['meals_cooked']}" if 'meals_cooked' in _home_savings else "—"
+    _inv_val = st.session_state.get('home_inventory_count', "—")
+    h1, h2, h3 = st.columns(3)
+    h1.metric("💵 " + ("Saved" if st.session_state['lang'] == 'en' else "Ahorrado"), _saved_val)
+    h2.metric("🍽️ " + ("Meals" if st.session_state['lang'] == 'en' else "Comidas"), _meals_val)
+    h3.metric("📦 " + ("Inventory" if st.session_state['lang'] == 'en' else "Inventario"), f"{_inv_val}")
+    qa1, qa2, qa3 = st.columns(3)
+    if qa1.button("➕ " + ("Inventory: Add Item" if st.session_state['lang'] == 'en' else "Inventario: Agregar"), use_container_width=True):
+        st.info("Open Inventory → Fridge/Pantry and use Quick Add in the sidebar." if st.session_state['lang'] == 'en' else "Abre Inventario → Refrigerador/Despensa y usa Quick Add en la barra lateral.")
+    if qa2.button("🗓️ " + ("Planning: Meals" if st.session_state['lang'] == 'en' else "Planificación: Comidas"), use_container_width=True):
+        st.info("Open Planning → Meals." if st.session_state['lang'] == 'en' else "Abre Planificación → Comidas.")
+    if qa3.button("🥗 " + ("Health: Nutrition" if st.session_state['lang'] == 'en' else "Salud: Nutrición"), use_container_width=True):
+        st.info("Open Health to view Nutrition." if st.session_state['lang'] == 'en' else "Abre Salud para ver Nutrición.")
+    st.markdown("---")
+    tab_dump, tab_rhythm = st.tabs([
+        "🧠 " + ("Brain Dump" if st.session_state['lang'] == 'en' else "Descarga Mental"),
+        "🌅 " + ("Daily Rhythm" if st.session_state['lang'] == 'en' else "Ritmo Diario")
+    ])
+
+# Inventory area
+with area_inventory:
+    tab1, tab_pantry = st.tabs([
+        t('tab_fridge'),
+        "🏺 " + ("Pantry" if st.session_state['lang'] == 'en' else "Despensa")
+    ])
+
+# Planning area
+with area_planning:
+    tab3, tab2, tab4 = st.tabs([
+        t('tab_meals'),
+        t('tab_shopping'),
+        t('tab_recipes')
+    ])
+
+# Health area
+with area_health:
+    tab_nutrition = st.container()
+
+# Insights area
+with area_insights:
+    tab0, tab5 = st.tabs([
+        "💪 " + ("My Impact" if st.session_state['lang'] == 'en' else "Mi Impacto"),
+        "📈 " + ("Reports" if st.session_state['lang'] == 'en' else "Reportes")
+    ])
 
 with tab0:
     st.title(f"💪 {user_name.split()[0]}{t('impact_title')}")
@@ -1781,3 +1830,4 @@ with tab5:
 
 
 st.markdown('<div class="footer-text">' + t('built_with_love') + '</div>', unsafe_allow_html=True)
+
