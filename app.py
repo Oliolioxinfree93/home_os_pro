@@ -6,6 +6,7 @@ import requests
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
+from meals_engine import MealsEngine, build_generation_prompt
 
 from datetime import date, timedelta, datetime
 from supabase import create_client
@@ -2354,3 +2355,4 @@ with area_insights:
 # FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="footer-text">' + t("built_with_love") + "</div>", unsafe_allow_html=True)
+
