@@ -14,7 +14,7 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-from meals_engine import MealsEngine, build_generation_prompt
+
 
 from translations import get_text
 from styles import get_css
@@ -481,6 +481,10 @@ def db_consume_ingredients(ingredient_names):
 # INIT USER SESSION
 # ──────────────────────────────────────────────────────────────────────────────
 user_id = check_login()
+# --- Meals Engine (must be after login) ---
+from meals_engine import MealsEngine, build_generation_prompt
+meals_engine = MealsEngine(supabase, user_id)
+
 user_name = st.session_state.get("user_name", "Friend")
 user_picture = st.session_state.get("user_picture", "")
 
@@ -2404,6 +2408,7 @@ with area_insights:
 # FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="footer-text">' + t("built_with_love") + "</div>", unsafe_allow_html=True)
+
 
 
 
