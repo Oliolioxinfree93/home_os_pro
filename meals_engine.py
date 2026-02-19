@@ -1,19 +1,15 @@
-# meals_engine.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 import re
 import pandas as pd
 
 
-def _safe_execute(fn):
-    """Run a Supabase query builder .execute() safely."""
-    try:
-        res = fn()
-        return res, None
-    except Exception as e:
-        return None, e
+@dataclass
+class ChildPref:
+    likes: Dict[str, int]
+    dislikes: Dict[str, int]
 
 
 def _norm_token(s: str) -> str:
@@ -29,76 +25,89 @@ def _to_list(v) -> List[str]:
     if isinstance(v, list):
         return [str(x) for x in v if str(x).strip()]
     if isinstance(v, str):
-        # allow comma-separated input
-        parts = [p.strip() for p in v.split(",")]
-        return [p for p in parts if p]
+        return [p.strip() for p in v.split(",") if p.strip()]
     return [str(v)]
 
 
-@dataclass
-class ChildPref:
-    likes: Dict[str, int]
-    dislikes: Dict[str, int]
-
-
 class MealsEngine:
-    """
-    Server-side helper for:
-    - child list
-    - recording picky eater feedback
-    - building meal generation prompts (family or individual)
-    """
-
     def __init__(self, supabase, user_id: str):
         self.supabase = supabase
         self.user_id = user_id
+        self.last_error: Optional[str] = None
 
-    # -------------------------
-    # Children
-    # -------------------------
+    def _set_error(self, err: Optional[Exception | str]):
+        self.last_error = str(err) if err else None
+
+    def _execute(self, query_fn):
+        try:
+            res = query_fn()
+            self._set_error(None)
+            return res
+        except Exception as e:
+            self._set_error(e)
+            return None
+
     def get_children_df(self) -> pd.DataFrame:
         if not self.supabase:
             return pd.DataFrame()
-        res, err = _safe_execute(
+        res = self._execute(
             lambda: self.supabase.table("children")
             .select("*")
             .eq("user_id", self.user_id)
             .order("created_at", desc=False)
             .execute()
         )
-        if err or not res or not getattr(res, "data", None):
+        if not res or not getattr(res, "data", None):
             return pd.DataFrame()
         return pd.DataFrame(res.data)
 
-    def add_child(self, child_name: str, birthdate: Optional[str] = None, notes: str = "") -> Tuple[bool, str]:
+    def add_child(self, name: str, birthdate_iso: Optional[str], notes: str) -> Tuple[bool, str]:
         if not self.supabase:
             return False, "No database connection."
-        child_name = (child_name or "").strip()
-        if not child_name:
+        name = (name or "").strip()
+        if not name:
             return False, "Child name required."
         payload = {
             "user_id": self.user_id,
-            "child_name": child_name,
-            "birthdate": birthdate,
+            "child_name": name,
+            "birthdate": birthdate_iso,
             "notes": notes or "",
         }
-        res, err = _safe_execute(lambda: self.supabase.table("children").insert(payload).execute())
-        if err:
-            return False, f"DB error: {err}"
+        res = self._execute(lambda: self.supabase.table("children").insert(payload).execute())
+        if not res:
+            return False, "Could not add child. Meals tables may not be set up yet."
         return True, "Child added."
 
-    # -------------------------
-    # Feedback
-    # -------------------------
+    def get_inventory_ingredients(self) -> List[str]:
+        if not self.supabase:
+            return []
+        res = self._execute(
+            lambda: self.supabase.table("inventory")
+            .select("item_name,status")
+            .eq("user_id", self.user_id)
+            .eq("status", "In Stock")
+            .execute()
+        )
+        if not res or not getattr(res, "data", None):
+            return []
+
+        seen, items = set(), []
+        for row in res.data:
+            token = _norm_token(row.get("item_name", ""))
+            if token and token not in seen:
+                seen.add(token)
+                items.append(token)
+        return items
+
     def record_feedback(
         self,
-        child_id: int,
-        meal_name: str,
-        ingredients: List[str],
-        ate: bool,
-        liked: bool,
-        rating: Optional[int] = None,
-        notes: str = "",
+        child_id,
+        meal_name,
+        ingredients,
+        ate,
+        liked,
+        rating,
+        notes,
     ) -> Tuple[bool, str]:
         if not self.supabase:
             return False, "No database connection."
@@ -107,62 +116,48 @@ class MealsEngine:
         if not meal_name:
             return False, "Meal name required."
 
-        ing = [_norm_token(x) for x in _to_list(ingredients)]
-        ing = [x for x in ing if x]
+        safe_ingredients = [_norm_token(x) for x in _to_list(ingredients)]
+        safe_ingredients = [x for x in safe_ingredients if x]
 
         payload = {
             "user_id": self.user_id,
             "child_id": int(child_id),
             "meal_name": meal_name,
-            "ingredients": ing,
+            "ingredients": safe_ingredients,
             "ate": bool(ate),
             "liked": bool(liked),
-            "rating": int(rating) if rating is not None and str(rating).strip() != "" else None,
+            "rating": int(rating) if rating is not None else None,
             "notes": notes or "",
         }
-        res, err = _safe_execute(lambda: self.supabase.table("meal_feedback").insert(payload).execute())
-        if err:
-            return False, f"DB error: {err}"
+        res = self._execute(lambda: self.supabase.table("meal_feedback").insert(payload).execute())
+        if not res:
+            return False, "Could not save feedback. Meals tables may not be set up yet."
         return True, "Saved."
 
-    def get_feedback_df(self, child_id: Optional[int] = None) -> pd.DataFrame:
+    def get_feedback_df(self) -> pd.DataFrame:
         if not self.supabase:
             return pd.DataFrame()
-
-        q = (
-            self.supabase.table("meal_feedback")
+        res = self._execute(
+            lambda: self.supabase.table("meal_feedback")
             .select("*")
             .eq("user_id", self.user_id)
             .order("created_at", desc=True)
+            .execute()
         )
-        if child_id:
-            q = q.eq("child_id", int(child_id))
-
-        res, err = _safe_execute(lambda: q.execute())
-        if err or not res or not getattr(res, "data", None):
+        if not res or not getattr(res, "data", None):
             return pd.DataFrame()
         return pd.DataFrame(res.data)
 
-    # -------------------------
-    # Preference modeling
-    # -------------------------
     def _prefs_from_feedback(self, df: pd.DataFrame) -> ChildPref:
-        likes: Dict[str, int] = {}
-        dislikes: Dict[str, int] = {}
-
+        likes, dislikes = {}, {}
         if df is None or df.empty:
             return ChildPref(likes=likes, dislikes=dislikes)
 
         for _, row in df.iterrows():
-            ing = row.get("ingredients") or []
-            ing = _to_list(ing)
-            ing = [_norm_token(x) for x in ing]
+            ing = [_norm_token(x) for x in _to_list(row.get("ingredients") or [])]
             ing = [x for x in ing if x]
-
             liked = bool(row.get("liked", True))
             ate = bool(row.get("ate", True))
-
-            # If they didn't eat it, treat as strong negative signal
             weight = 2 if not ate else 1
 
             for token in ing:
@@ -170,54 +165,17 @@ class MealsEngine:
                     likes[token] = likes.get(token, 0) + 1
                 else:
                     dislikes[token] = dislikes.get(token, 0) + weight
-
         return ChildPref(likes=likes, dislikes=dislikes)
 
-    def get_child_prefs(self, child_id: int) -> ChildPref:
-        df = self.get_feedback_df(child_id=child_id)
-        return self._prefs_from_feedback(df)
-
     def get_family_prefs(self) -> ChildPref:
-        df = self.get_feedback_df(child_id=None)
+        return self._prefs_from_feedback(self.get_feedback_df())
 
-        # aggregate across kids
-        prefs = self._prefs_from_feedback(df)
-        return prefs
-
-    # -------------------------
-    # Inventory helpers
-    # -------------------------
-    def get_inventory_ingredients(self) -> List[str]:
-        """
-        Pull your inventory items and turn them into 'available ingredients'.
-        This assumes you already store items in `inventory` table.
-        """
-        if not self.supabase:
-            return []
-        res, err = _safe_execute(
-            lambda: self.supabase.table("inventory")
-            .select("item_name,category,storage,expiry_date,status")
-            .eq("user_id", self.user_id)
-            .eq("status", "In Stock")
-            .execute()
-        )
-        if err or not res or not getattr(res, "data", None):
-            return []
-
-        items = []
-        for r in res.data:
-            name = _norm_token(r.get("item_name", ""))
-            if name:
-                items.append(name)
-
-        # de-dupe while preserving order
-        seen = set()
-        out = []
-        for x in items:
-            if x not in seen:
-                seen.add(x)
-                out.append(x)
-        return out
+    def get_child_prefs(self, child_id) -> ChildPref:
+        df = self.get_feedback_df()
+        if df.empty or "child_id" not in df.columns:
+            return ChildPref(likes={}, dislikes={})
+        child_df = df[df["child_id"].astype(str) == str(child_id)]
+        return self._prefs_from_feedback(child_df)
 
 
 def build_generation_prompt(
@@ -231,9 +189,6 @@ def build_generation_prompt(
     style: str = "simple family-friendly",
     constraints: Optional[List[str]] = None,
 ) -> str:
-    """
-    Build a strong, structured prompt for Gemini (or any LLM).
-    """
     constraints = constraints or []
     likes_sorted = sorted(likes.items(), key=lambda x: x[1], reverse=True)[:25]
     dislikes_sorted = sorted(dislikes.items(), key=lambda x: x[1], reverse=True)[:25]
@@ -256,7 +211,7 @@ def build_generation_prompt(
     if constraints:
         rules.append("Constraints: " + "; ".join(constraints))
 
-    prompt = f"""
+    return f"""
 You are a helpful meal planner for a busy household.
 
 AVAILABLE INGREDIENTS (from fridge/pantry):
@@ -269,6 +224,4 @@ DISLIKED INGREDIENT SIGNALS:
 {dislikes_str}
 
 RULES:
-- """ + "\n- ".join(rules).strip() + "\n"
-
-    return prompt.strip()
+- """ + "\n- ".join(rules).strip()
