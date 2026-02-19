@@ -51,6 +51,56 @@ def t(key, *args):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# UI HELPERS
+# ──────────────────────────────────────────────────────────────────────────────
+def inject_global_styles():
+    st.markdown(
+        """
+        <style>
+        .ui-section { margin-top: 0.5rem; margin-bottom: 0.25rem; }
+        .ui-card {
+            border: 1px solid rgba(120,120,120,0.25);
+            border-radius: 12px;
+            padding: 0.75rem 0.9rem;
+            margin: 0.35rem 0 0.85rem 0;
+            background: rgba(255,255,255,0.02);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def ui_section(title: str, subtitle: str | None = None):
+    st.markdown(f"<div class='ui-section'><h3>{title}</h3></div>", unsafe_allow_html=True)
+    if subtitle:
+        st.caption(subtitle)
+
+
+def ui_card_start():
+    st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+
+
+def ui_card_end():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def ui_card(render_fn):
+    ui_card_start()
+    try:
+        render_fn()
+    finally:
+        ui_card_end()
+
+
+def toast_saved():
+    st.toast("✅ Saved")
+
+
+inject_global_styles()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # SUPABASE
 # ──────────────────────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -60,9 +110,6 @@ def get_supabase():
     except Exception as e:
         st.error(f"Database error: {e}")
         return None
-
-
-supabase = get_supabase()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -481,10 +528,11 @@ def db_consume_ingredients(ingredient_names):
 # INIT USER SESSION
 # ──────────────────────────────────────────────────────────────────────────────
 user_id = check_login()
+supabase = get_supabase()
 user_name = st.session_state.get("user_name", "Friend")
 user_picture = st.session_state.get("user_picture", "")
 
-# --- Meals Engine (must be after login) ---
+# --- Meals Engine (must be after login and Supabase init) ---
 from meals_engine import MealsEngine, build_generation_prompt
 meals_engine = MealsEngine(supabase, user_id)
 
@@ -1724,90 +1772,37 @@ with area_inventory:
 # PLANNING
 # ──────────────────────────────────────────────────────────────────────────────
 with area_planning:
-    tab_meals, tab_shopping, tab_recipes = st.tabs([t("tab_meals"), t("tab_shopping"), t("tab_recipes")])
-        # --- MEALS TAB ---
-    with tab_meals:
+    tab_meals_planning, tab_shopping, tab_recipes = st.tabs([t("tab_meals"), t("tab_shopping"), t("tab_recipes")])
+    # --- MEALS TAB ---
+    with tab_meals_planning:
         ui_section("Meals", "Track what each child actually eats + generate meals based on preferences.")
+        if meals_engine.last_error:
+            st.warning("Meals tables not set up yet. Run supabase/meals_schema.sql")
 
-    # -------------------------
-    # Load children
-    # -------------------------
-    children_df = meals_engine.get_children_df()
-    children = []
-    if not children_df.empty:
-        children = [(int(r["id"]), r["child_name"]) for _, r in children_df.iterrows()]
+        # -------------------------
+        # Load children
+        # -------------------------
+        children_df = meals_engine.get_children_df()
+        children = []
+        if not children_df.empty:
+            children = [(int(r["id"]), r["child_name"]) for _, r in children_df.iterrows()]
 
-    colA, colB = st.columns([1, 1], gap="large")
+        colA, colB = st.columns([1, 1], gap="large")
 
-    # -------------------------
-    # Add Child
-    # -------------------------
-    with colA:
-        ui_card_start()
-        st.subheader("👶 Add Child")
+        # -------------------------
+        # Add Child
+        # -------------------------
+        with colA:
+            ui_card_start()
+            st.subheader("👶 Add Child")
 
-        new_child_name = st.text_input("Child name", placeholder="e.g. Mateo", key="child_name_add")
-        new_child_birthdate = st.date_input("Birthdate (optional)", value=None, key="child_birthdate_add")
-        new_child_notes = st.text_area("Notes (optional)", placeholder="Allergies, texture issues, etc.", key="child_notes_add")
+            new_child_name = st.text_input("Child name", placeholder="e.g. Mateo", key="child_name_add")
+            new_child_birthdate = st.date_input("Birthdate (optional)", value=None, key="child_birthdate_add")
+            new_child_notes = st.text_area("Notes (optional)", placeholder="Allergies, texture issues, etc.", key="child_notes_add")
 
-        if st.button("Add Child", type="primary", use_container_width=True):
-            birth_str = new_child_birthdate.isoformat() if new_child_birthdate else None
-            ok, msg = meals_engine.add_child(new_child_name, birth_str, new_child_notes)
-            if ok:
-                toast_saved()
-                st.rerun()
-            else:
-                st.error(msg)
-
-        ui_card_end()
-
-    # -------------------------
-    # Record Feedback
-    # -------------------------
-    with colB:
-        ui_card_start()
-        st.subheader("🍽️ Log Meal Feedback")
-
-        if not children:
-            st.info("Add a child first.")
-            ui_card_end()
-        else:
-            child_label_map = {f"{name} (id {cid})": cid for cid, name in children}
-            child_choice = st.selectbox("Child", list(child_label_map.keys()), key="child_pick_feedback")
-            child_id = child_label_map[child_choice]
-
-            meal_name = st.text_input("Meal name", placeholder="e.g. chicken tacos", key="meal_name_feedback")
-
-            # Pull ingredient suggestions from inventory
-            inv_ings = meals_engine.get_inventory_ingredients()
-            ingredient_mode = st.radio("Ingredients input", ["Pick from inventory", "Type manually"], horizontal=True)
-
-            if ingredient_mode == "Pick from inventory":
-                ingredients = st.multiselect(
-                    "Ingredients in the meal (select what was in it)",
-                    options=inv_ings,
-                    default=[],
-                    key="meal_ingredients_pick",
-                )
-            else:
-                ingredients_text = st.text_input("Ingredients (comma-separated)", placeholder="chicken, tortillas, cheese", key="meal_ingredients_text")
-                ingredients = [x.strip() for x in ingredients_text.split(",") if x.strip()]
-
-            ate = st.toggle("Child ate it", value=True, key="meal_ate_toggle")
-            liked = st.toggle("Child liked it", value=True, key="meal_liked_toggle")
-            rating = st.slider("Rating (optional)", min_value=1, max_value=5, value=4, key="meal_rating_slider")
-            notes = st.text_area("Notes (optional)", placeholder="Loved the sauce, hated texture, only ate if cut small...", key="meal_notes_feedback")
-
-            if st.button("Save Feedback", type="primary", use_container_width=True):
-                ok, msg = meals_engine.record_feedback(
-                    child_id=child_id,
-                    meal_name=meal_name,
-                    ingredients=ingredients,
-                    ate=ate,
-                    liked=liked,
-                    rating=rating,
-                    notes=notes,
-                )
+            if st.button("Add Child", type="primary", use_container_width=True):
+                birth_str = new_child_birthdate.isoformat() if new_child_birthdate else None
+                ok, msg = meals_engine.add_child(new_child_name, birth_str, new_child_notes)
                 if ok:
                     toast_saved()
                     st.rerun()
@@ -1816,122 +1811,177 @@ with area_planning:
 
             ui_card_end()
 
-    st.divider()
+        # -------------------------
+        # Record Feedback
+        # -------------------------
+        with colB:
+            ui_card_start()
+            st.subheader("🍽️ Log Meal Feedback")
 
-    # -------------------------
-    # Generate meals: family vs individual
-    # -------------------------
-    ui_section("Generate Meals", "Family meals or per-child meals based on what they like / refuse.")
+            if not children:
+                st.info("Add a child first.")
+                ui_card_end()
+            else:
+                child_label_map = {f"{name} (id {cid})": cid for cid, name in children}
+                child_choice = st.selectbox("Child", list(child_label_map.keys()), key="child_pick_feedback")
+                child_id = child_label_map[child_choice]
 
-    ui_card_start()
+                meal_name = st.text_input("Meal name", placeholder="e.g. chicken tacos", key="meal_name_feedback")
 
-    scope = st.radio("Generate for", ["Family", "Individual child"], horizontal=True, key="meal_scope")
-    meal_count = st.number_input("How many meals?", min_value=3, max_value=14, value=6, step=1, key="meal_count")
-    style = st.selectbox(
-        "Style",
-        ["simple family-friendly", "high-protein", "budget-friendly", "quick 15-minute", "healthy kid-friendly", "Mexican-inspired", "comfort food"],
-        index=0,
-        key="meal_style",
-    )
+                # Pull ingredient suggestions from inventory
+                inv_ings = meals_engine.get_inventory_ingredients()
+                ingredient_mode = st.radio("Ingredients input", ["Pick from inventory", "Type manually"], horizontal=True)
 
-    constraints = []
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.checkbox("No pork", value=False): constraints.append("No pork")
-        if st.checkbox("No nuts", value=False): constraints.append("No nuts")
-    with c2:
-        if st.checkbox("Dairy-free", value=False): constraints.append("Dairy-free")
-        if st.checkbox("Gluten-free", value=False): constraints.append("Gluten-free")
-    with c3:
-        if st.checkbox("Low sugar", value=False): constraints.append("Low sugar")
-        if st.checkbox("Vegetarian", value=False): constraints.append("Vegetarian")
+                if ingredient_mode == "Pick from inventory":
+                    ingredients = st.multiselect(
+                        "Ingredients in the meal (select what was in it)",
+                        options=inv_ings,
+                        default=[],
+                        key="meal_ingredients_pick",
+                    )
+                else:
+                    ingredients_text = st.text_input("Ingredients (comma-separated)", placeholder="chicken, tortillas, cheese", key="meal_ingredients_text")
+                    ingredients = [x.strip() for x in ingredients_text.split(",") if x.strip()]
 
-    child_name = None
-    child_id = None
+                ate = st.toggle("Child ate it", value=True, key="meal_ate_toggle")
+                liked = st.toggle("Child liked it", value=True, key="meal_liked_toggle")
+                rating = st.slider("Rating (optional)", min_value=1, max_value=5, value=4, key="meal_rating_slider")
+                notes = st.text_area("Notes (optional)", placeholder="Loved the sauce, hated texture, only ate if cut small...", key="meal_notes_feedback")
 
-    if scope == "Individual child":
-        if not children:
-            st.info("Add a child first.")
-        else:
-            child_label_map2 = {f"{name} (id {cid})": (cid, name) for cid, name in children}
-            picked = st.selectbox("Which child?", list(child_label_map2.keys()), key="meal_child_pick_generate")
-            child_id, child_name = child_label_map2[picked]
+                if st.button("Save Feedback", type="primary", use_container_width=True):
+                    ok, msg = meals_engine.record_feedback(
+                        child_id=child_id,
+                        meal_name=meal_name,
+                        ingredients=ingredients,
+                        ate=ate,
+                        liked=liked,
+                        rating=rating,
+                        notes=notes,
+                    )
+                    if ok:
+                        toast_saved()
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
-    # Build prompt
-    available = meals_engine.get_inventory_ingredients()
-    if scope == "Family":
-        prefs = meals_engine.get_family_prefs()
-        prompt = build_generation_prompt(
-            available_ingredients=available,
-            likes=prefs.likes,
-            dislikes=prefs.dislikes,
-            scope="family",
-            child_name=None,
-            meal_count=int(meal_count),
-            style=style,
-            constraints=constraints,
+                ui_card_end()
+
+        st.divider()
+
+        # -------------------------
+        # Generate meals: family vs individual
+        # -------------------------
+        ui_section("Generate Meals", "Family meals or per-child meals based on what they like / refuse.")
+
+        ui_card_start()
+
+        scope = st.radio("Generate for", ["Family", "Individual child"], horizontal=True, key="meal_scope")
+        meal_count = st.number_input("How many meals?", min_value=3, max_value=14, value=6, step=1, key="meal_count")
+        style = st.selectbox(
+            "Style",
+            ["simple family-friendly", "high-protein", "budget-friendly", "quick 15-minute", "healthy kid-friendly", "Mexican-inspired", "comfort food"],
+            index=0,
+            key="meal_style",
         )
-    else:
-        if child_id is None:
-            prompt = ""
-        else:
-            prefs = meals_engine.get_child_prefs(child_id)
+
+        constraints = []
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.checkbox("No pork", value=False): constraints.append("No pork")
+            if st.checkbox("No nuts", value=False): constraints.append("No nuts")
+        with c2:
+            if st.checkbox("Dairy-free", value=False): constraints.append("Dairy-free")
+            if st.checkbox("Gluten-free", value=False): constraints.append("Gluten-free")
+        with c3:
+            if st.checkbox("Low sugar", value=False): constraints.append("Low sugar")
+            if st.checkbox("Vegetarian", value=False): constraints.append("Vegetarian")
+
+        child_name = None
+        child_id = None
+
+        if scope == "Individual child":
+            if not children:
+                st.info("Add a child first.")
+            else:
+                child_label_map2 = {f"{name} (id {cid})": (cid, name) for cid, name in children}
+                picked = st.selectbox("Which child?", list(child_label_map2.keys()), key="meal_child_pick_generate")
+                child_id, child_name = child_label_map2[picked]
+
+        # Build prompt
+        available = meals_engine.get_inventory_ingredients()
+        if scope == "Family":
+            prefs = meals_engine.get_family_prefs()
             prompt = build_generation_prompt(
                 available_ingredients=available,
                 likes=prefs.likes,
                 dislikes=prefs.dislikes,
-                scope="child",
-                child_name=child_name,
+                scope="family",
+                child_name=None,
                 meal_count=int(meal_count),
                 style=style,
                 constraints=constraints,
             )
-
-    with st.expander("🔧 See generation prompt (debug)", expanded=False):
-        st.code(prompt or "Pick a child to generate.", language="text")
-
-    if st.button("✨ Generate meals with AI", type="primary", use_container_width=True, disabled=not bool(prompt)):
-        # --- Call Gemini (optional)
-        # If you already have a Gemini helper elsewhere, replace this block with your existing function.
-        try:
-            import google.generativeai as genai
-
-            api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
-            if not api_key:
-                st.error("Missing GEMINI_API_KEY in Streamlit secrets.")
+        else:
+            if child_id is None:
+                prompt = ""
             else:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel("gemini-2.0-flash")
-                with st.spinner("Thinking..."):
-                    out = model.generate_content(prompt)
-                st.markdown(out.text)
-        except Exception as e:
-            st.error("AI generation failed.")
-            st.exception(e)
+                prefs = meals_engine.get_child_prefs(child_id)
+                prompt = build_generation_prompt(
+                    available_ingredients=available,
+                    likes=prefs.likes,
+                    dislikes=prefs.dislikes,
+                    scope="child",
+                    child_name=child_name,
+                    meal_count=int(meal_count),
+                    style=style,
+                    constraints=constraints,
+                )
 
-    ui_card_end()
+        with st.expander("🔧 See generation prompt (debug)", expanded=False):
+            st.code(prompt or "Pick a child to generate.", language="text")
 
-    st.divider()
+        if st.button("✨ Generate meals with AI", type="primary", use_container_width=True, disabled=not bool(prompt)):
+            # --- Call Gemini (optional)
+            # If you already have a Gemini helper elsewhere, replace this block with your existing function.
+            try:
+                import google.generativeai as genai
 
-    # -------------------------
-    # Recent feedback table (safe)
-    # -------------------------
-    ui_section("Recent Feedback", "What your kids have been saying with their plates.")
+                api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+                if not api_key:
+                    st.error("Missing GEMINI_API_KEY in Streamlit secrets.")
+                else:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel("gemini-2.0-flash")
+                    with st.spinner("Thinking..."):
+                        out = model.generate_content(prompt)
+                    st.markdown(out.text)
+            except Exception as e:
+                st.error("AI generation failed.")
+                st.exception(e)
 
-    try:
-        feedback_df = meals_engine.get_feedback_df()
-    except Exception:
-        feedback_df = pd.DataFrame()
+        ui_card_end()
 
-    if feedback_df.empty:
-        st.info("No feedback yet — log a meal above.")
-    else:
-        # Make it prettier
-        show = feedback_df.copy()
-        if "ingredients" in show.columns:
-            show["ingredients"] = show["ingredients"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
-        show = show[["created_at", "child_id", "meal_name", "ate", "liked", "rating", "ingredients", "notes"]].head(50)
-        st.dataframe(show, use_container_width=True)
+        st.divider()
+
+        # -------------------------
+        # Recent feedback table (safe)
+        # -------------------------
+        ui_section("Recent Feedback", "What your kids have been saying with their plates.")
+
+        try:
+            feedback_df = meals_engine.get_feedback_df()
+        except Exception:
+            feedback_df = pd.DataFrame()
+
+        if feedback_df.empty:
+            st.info("No feedback yet — log a meal above.")
+        else:
+            # Make it prettier
+            show = feedback_df.copy()
+            if "ingredients" in show.columns:
+                show["ingredients"] = show["ingredients"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+            show = show[["created_at", "child_id", "meal_name", "ate", "liked", "rating", "ingredients", "notes"]].head(50)
+            st.dataframe(show, use_container_width=True)
 
 
 
@@ -2075,7 +2125,9 @@ with area_planning:
             st.success(t("shopping_list_empty"))
 
     # ── MEALS ──
-    with tab_meals:
+    with tab_meals_planning:
+        st.divider()
+        st.caption("Legacy weekly meal planner")
         st.header(t("meal_planner_title"))
         start_date_ = st.date_input(t("week_starting"), value=date.today() - timedelta(days=date.today().weekday()))
         week_plan = db_get_meal_plan(start_date_)
